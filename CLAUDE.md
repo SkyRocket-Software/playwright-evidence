@@ -27,8 +27,8 @@ src/
 
 ## Conventions
 
-- No build step — TypeScript source is consumed directly via `tsx` or Playwright's native TS support
-- All exports go through `src/index.ts`; the reporter is also accessible via the `./reporter` export condition for use as a Playwright reporter path
+- **Build step required** — `tsup` compiles to `dist/` (ESM + `.d.ts`); run `npm run build` before publishing. The `prepare` script runs automatically on `npm install`.
+- All exports go through `src/index.ts`; the reporter is also accessible via the `./reporter` export condition (maps to `dist/reporter.js`) for use as a Playwright reporter path
 
 ## Usage for AI-assisted development
 
