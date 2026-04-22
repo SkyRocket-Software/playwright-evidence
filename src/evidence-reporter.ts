@@ -10,17 +10,28 @@ import path from 'path';
 import { renderReport } from './html.ts';
 import type { StepRecord, TestRecord } from './html.ts';
 
+interface EvidenceReporterOptions {
+  /** Output filename. Default: evidence-report.html */
+  file?: string;
+  /** Report heading. Default: Test Evidence Report */
+  title?: string;
+}
+
 /**
  * Playwright reporter that produces a single self-contained HTML evidence report.
  * All screenshots are embedded as base64. No external dependencies in the output.
  *
- * Configure via environment variables:
- *   EVIDENCE_REPORT_FILE  — output filename (default: evidence-report.html)
- *   EVIDENCE_REPORT_TITLE — report title (default: Test Evidence Report)
+ * Configure via reporter options in playwright.config.ts:
+ *   reporter: [['@skyrocket-software/playwright-evidence/reporter', { file: 'my-report.html', title: 'My Report' }]]
  */
 export default class EvidenceReporter implements Reporter {
   private tests: TestRecord[] = [];
   private startTime: Date = new Date();
+  private options: EvidenceReporterOptions;
+
+  constructor(options: EvidenceReporterOptions = {}) {
+    this.options = options;
+  }
 
   onBegin(_config: unknown, _suite: Suite): void {
     this.startTime = new Date();
@@ -83,10 +94,10 @@ export default class EvidenceReporter implements Reporter {
   }
 
   onEnd(): void {
-    const title = process.env['EVIDENCE_REPORT_TITLE'] ?? 'Test Evidence Report';
+    const title = this.options.title ?? 'Test Evidence Report';
     const html = renderReport(title, this.tests, this.startTime);
 
-    const filename = process.env['EVIDENCE_REPORT_FILE'] ?? 'evidence-report.html';
+    const filename = this.options.file ?? 'evidence-report.html';
     const outPath = path.resolve(filename);
     fs.writeFileSync(outPath, html, 'utf8');
     console.log(`\nEvidence report written to: ${outPath}`);
