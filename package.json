@@ -1,0 +1,20 @@
+{
+  "name": "@skyrocket-software/playwright-evidence",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./reporter": "./src/evidence-reporter.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "peerDependencies": {
+    "@playwright/test": ">=1.50.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^25.6.0",
+    "typescript": "^5.7.3"
+  }
+}
