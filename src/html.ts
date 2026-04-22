@@ -1,6 +1,20 @@
 /**
- * Shared HTML primitives for evidence reports.
+ * Shared HTML primitives and report-rendering functions for evidence reports.
  */
+
+export interface StepRecord {
+  title: string;
+  status: 'pass' | 'fail';
+  screenshotBase64: string | null;
+  screenshotLabel: string | null;
+}
+
+export interface TestRecord {
+  title: string;
+  status: 'pass' | 'fail' | 'skipped';
+  steps: StepRecord[];
+  error: string | null;
+}
 
 export function escapeHtml(str: string): string {
   return str
@@ -200,4 +214,99 @@ ${body}
 
 export function runDate(date: Date): string {
   return date.toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' });
+}
+
+/**
+ * Renders a single step row (or setup row) as HTML table row(s).
+ * Setup steps (no screenshot) are rendered muted. Evidence steps include a screenshot row.
+ */
+export function renderStep(step: StepRecord, index: number): string {
+  if (step.screenshotBase64 === null) {
+    return `
+      <tr style="opacity:0.5;">
+        <td class="col-num">${index}</td>
+        <td><em>${escapeHtml(step.title)}</em></td>
+        <td class="col-status" style="font-size:11px;color:#888;">setup</td>
+      </tr>`;
+  }
+
+  const screenshotRow = `<tr class="screenshot-row">
+          <td colspan="3">
+            <img src="data:image/png;base64,${step.screenshotBase64}" alt="${escapeHtml(step.screenshotLabel ?? step.title)}" />
+            <p class="screenshot-caption">Screenshot: ${escapeHtml(step.screenshotLabel ?? step.title)}</p>
+          </td>
+        </tr>`;
+
+  return `
+      <tr>
+        <td class="col-num">${index}</td>
+        <td>${escapeHtml(step.title)}</td>
+        <td class="col-status">${badge(step.status === 'pass' ? 'PASS' : 'FAIL', step.status)}</td>
+      </tr>
+      ${screenshotRow}`;
+}
+
+/**
+ * Renders a single test section (header, step table, error block) as HTML.
+ *
+ * @param test  - The plain test record to render
+ * @param index - 1-based position in the report, used for the section heading
+ */
+export function renderTest(test: TestRecord, index: number): string {
+  const badgeVariant = test.status === 'pass' ? 'pass' : test.status === 'skipped' ? 'skipped' : 'fail';
+  const badgeText = test.status === 'pass' ? 'PASS' : test.status === 'skipped' ? 'SKIP' : 'FAIL';
+
+  const stepRows = test.steps
+    .map((step, si) => renderStep(step, si + 1))
+    .join('\n');
+
+  const errorBlock = test.error
+    ? `<div class="error-block">${escapeHtml(stripAnsi(test.error))}</div>`
+    : '';
+
+  return `
+    <div class="section">
+      <div class="section-header">
+        <h2>${index}. ${escapeHtml(test.title)}</h2>
+        ${badge(badgeText, badgeVariant)}
+      </div>
+      ${stepRows
+        ? `<table class="data-table">
+          <thead><tr><th>#</th><th>Step</th><th>Result</th></tr></thead>
+          <tbody>${stepRows}</tbody>
+        </table>`
+        : '<p style="color:#888;font-size:13px;">No recorded steps.</p>'
+      }
+      ${errorBlock}
+    </div>`;
+}
+
+/**
+ * Renders the full evidence report as a self-contained HTML string.
+ *
+ * @param title     - Report title (shown in cover and <title>)
+ * @param tests     - Ordered list of test records to include
+ * @param startTime - When the test run began, shown in the cover
+ */
+export function renderReport(title: string, tests: TestRecord[], startTime: Date): string {
+  const passed = tests.filter((t) => t.status === 'pass').length;
+  const failed = tests.filter((t) => t.status === 'fail').length;
+  const total = tests.length;
+  const overallStatus = failed === 0 ? 'PASS' : 'FAIL';
+
+  const testSections = tests
+    .map((t, i) => renderTest(t, i + 1))
+    .join('\n');
+
+  return htmlDocument(title, `
+  <div class="cover">
+    <h1>${title}</h1>
+    <p class="meta">Generated: ${runDate(startTime)}</p>
+    <div class="summary-box overall-${overallStatus.toLowerCase()}">
+      <div class="overall ${overallStatus === 'PASS' ? 'pass-text' : 'fail-text'}">${overallStatus}</div>
+      <div>${passed} of ${total} test${total !== 1 ? 's' : ''} passed</div>
+    </div>
+  </div>
+  <div class="body">${testSections}</div>
+`);
 }
