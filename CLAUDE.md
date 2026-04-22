@@ -11,7 +11,7 @@
 
 ```
 src/
-  html.ts              # Shared HTML primitives: escapeHtml, badge, sharedStyles, htmlDocument, runDate
+  html.ts              # HTML rendering: escapeHtml, stripAnsi, badge, htmlDocument, runDate, renderStep, renderTest, renderReport
   evidence-reporter.ts # Playwright Reporter implementation — writes evidence-report.html on onEnd()
   step.ts              # setupStep() and evidenceStep() helpers for use in test files
   index.ts             # Public exports: setupStep, evidenceStep, EvidenceReporter
@@ -22,8 +22,8 @@ src/
 - **Self-contained output** — screenshots are base64-embedded in the HTML; no external files or assets
 - **Two step types** — `setupStep` (no screenshot, muted in report) vs `evidenceStep` (always screenshots, pass/fail badge)
 - **Screenshot via body buffer** — `page.screenshot()` returns a Buffer passed directly to `testInfo.attach({ body })`, avoiding tmpdir writes
-- **Configurable via env vars** — `EVIDENCE_REPORT_FILE` and `EVIDENCE_REPORT_TITLE` allow the same reporter to produce differently named/titled reports (e.g. for gremlin runs)
-- **Reporter is opt-in** — not registered in `playwright.config.ts` by default; consumers invoke it explicitly via `--reporter` flag so `npm test` uses Playwright's built-in HTML reporter and `npm run report` uses this one
+- **Configurable via reporter options** — `file` and `title` options passed in `playwright.config.ts` allow the same reporter to produce differently named/titled reports (e.g. `[['@skyrocket-software/playwright-evidence/reporter', { file: 'gremlin-report.html', title: 'Trial Run' }]]`)
+- **Reporter is opt-in** — not registered in `playwright.config.ts` by default; consumers add it explicitly to the `reporter` array in their own `playwright.config.ts`
 
 ## Conventions
 

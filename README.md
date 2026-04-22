@@ -14,24 +14,25 @@ Requires `@playwright/test >= 1.50.0` as a peer dependency.
 
 ### Reporter
 
-Run tests with the evidence reporter to produce `evidence-report.html`:
+Register the reporter in your `playwright.config.ts`:
 
-```bash
-npx playwright test --reporter=@skyrocket-software/playwright-evidence/reporter
+```ts
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  reporter: [
+    ['@skyrocket-software/playwright-evidence/reporter', {
+      file: 'evidence-report.html',   // optional, default: evidence-report.html
+      title: 'Test Evidence Report',  // optional, default: Test Evidence Report
+    }],
+  ],
+});
 ```
 
-Or wire it into a package.json script:
-
-```json
-"report": "playwright test --reporter=@skyrocket-software/playwright-evidence/reporter; open evidence-report.html"
-```
-
-Configure output via environment variables:
-
-| Variable | Default | Description |
+| Option | Default | Description |
 | --- | --- | --- |
-| `EVIDENCE_REPORT_FILE` | `evidence-report.html` | Output filename |
-| `EVIDENCE_REPORT_TITLE` | `Test Evidence Report` | Report heading |
+| `file` | `evidence-report.html` | Output filename |
+| `title` | `Test Evidence Report` | Report heading |
 
 ### Step helpers
 
