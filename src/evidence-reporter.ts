@@ -99,6 +99,7 @@ export default class EvidenceReporter implements Reporter {
 
     const filename = this.options.file ?? 'evidence-report.html';
     const outPath = path.resolve(filename);
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, html, 'utf8');
     console.log(`\nEvidence report written to: ${outPath}`);
   }
