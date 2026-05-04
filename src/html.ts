@@ -289,6 +289,38 @@ export function renderTest(test: TestRecord, index: number): string {
 }
 
 /**
+ * Renders a table of contents listing each test with its index and pass/fail status.
+ * Page numbers are not available at render time (Chromium paginates after render),
+ * so the TOC serves as a numbered index only.
+ */
+export function renderToc(tests: TestRecord[]): string {
+  if (tests.length === 0) return '';
+
+  const rows = tests.map((test, i) => {
+    const num = i + 1;
+    const badgeVariant = test.status === 'pass' ? 'pass' : test.status === 'skipped' ? 'skipped' : 'fail';
+    const badgeText = test.status === 'pass' ? 'PASS' : test.status === 'skipped' ? 'SKIP' : 'FAIL';
+    return `
+      <tr>
+        <td class="col-num">${num}</td>
+        <td>${escapeHtml(test.title)}</td>
+        <td class="col-status">${badge(badgeText, badgeVariant)}</td>
+      </tr>`;
+  }).join('\n');
+
+  return `
+    <div class="section toc" style="page-break-after:always;">
+      <div class="section-header">
+        <h2>Contents</h2>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Test</th><th>Result</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+/**
  * Renders the full evidence report as a self-contained HTML string.
  *
  * @param title     - Report title (shown in cover and <title>)
@@ -301,6 +333,7 @@ export function renderReport(title: string, tests: TestRecord[], startTime: Date
   const total = tests.length;
   const overallStatus = failed === 0 ? 'PASS' : 'FAIL';
 
+  const toc = renderToc(tests);
   const testSections = tests
     .map((t, i) => renderTest(t, i + 1))
     .join('\n');
@@ -314,6 +347,9 @@ export function renderReport(title: string, tests: TestRecord[], startTime: Date
       <div>${passed} of ${total} test${total !== 1 ? 's' : ''} passed</div>
     </div>
   </div>
-  <div class="body">${testSections}</div>
+  <div class="body">
+    ${toc}
+    ${testSections}
+  </div>
 `);
 }

@@ -6,6 +6,7 @@ import {
   renderReport,
   renderStep,
   renderTest,
+  renderToc,
   runDate,
   stripAnsi,
 } from './html.ts';
@@ -301,6 +302,51 @@ describe('renderTest', () => {
   it('renders no error block when error is null', () => {
     const html = renderTest(passingTest, 1);
     expect(html).not.toContain('error-block');
+  });
+});
+
+// ── renderToc ─────────────────────────────────────────────────────────────────
+
+describe('renderToc', () => {
+  it('returns an empty string when there are no tests', () => {
+    expect(renderToc([])).toBe('');
+  });
+
+  it('lists each test title', () => {
+    const html = renderToc([passingTest, failingTest]);
+    expect(html).toContain('User can log in');
+    expect(html).toContain('Form submits data');
+  });
+
+  it('numbers entries in order', () => {
+    const html = renderToc([passingTest, failingTest]);
+    expect(html).toContain('>1<');
+    expect(html).toContain('>2<');
+  });
+
+  it('renders a PASS badge for a passing test', () => {
+    const html = renderToc([passingTest]);
+    expect(html).toContain('badge-pass');
+    expect(html).toContain('>PASS<');
+  });
+
+  it('renders a FAIL badge for a failing test', () => {
+    const html = renderToc([failingTest]);
+    expect(html).toContain('badge-fail');
+    expect(html).toContain('>FAIL<');
+  });
+
+  it('renders a SKIP badge for a skipped test', () => {
+    const html = renderToc([skippedTest]);
+    expect(html).toContain('badge-skipped');
+    expect(html).toContain('>SKIP<');
+  });
+
+  it('escapes special characters in test titles', () => {
+    const test: TestRecord = { ...passingTest, title: '<script>alert(1)</script>' };
+    const html = renderToc([test]);
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toContain('<script>alert');
   });
 });
 
