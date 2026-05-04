@@ -16,7 +16,7 @@ const mockClose = vi.fn().mockResolvedValue(undefined);
 const mockBrowser = { newPage: mockNewPage, close: mockClose };
 const mockLaunch = vi.fn().mockResolvedValue(mockBrowser);
 
-vi.mock('playwright', () => ({
+vi.mock('playwright-core', () => ({
   chromium: { launch: mockLaunch },
 }));
 

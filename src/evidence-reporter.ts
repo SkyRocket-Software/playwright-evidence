@@ -180,7 +180,7 @@ export default class EvidenceReporter implements Reporter {
   ): Promise<void> {
     // Dynamic import keeps startup fast when PDF is not requested,
     // and avoids a hard import that would fail if playwright is absent.
-    const { chromium } = await import('playwright');
+    const { chromium } = await import('playwright-core');
 
     const dateStr = startTime.toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' });
 

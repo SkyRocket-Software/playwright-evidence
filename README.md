@@ -13,7 +13,7 @@ Two output modes:
 npm install --save-dev github:skyrocket-software/playwright-evidence
 ```
 
-Requires `@playwright/test >= 1.50.0` as a peer dependency.
+Requires `@playwright/test >= 1.50.0` and `playwright-core >= 1.50.0` as peer dependencies. Both are satisfied automatically if you have `@playwright/test` installed.
 
 ## Usage
 
