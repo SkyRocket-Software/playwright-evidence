@@ -121,34 +121,24 @@ describe('EvidenceReporter', () => {
       }));
     });
 
-    it('navigates to the intermediate HTML file via file:// URL', async () => {
+    it('navigates to report.html inside the temp directory via file:// URL', async () => {
       const pdfFile = path.join(tmpDir, 'report.pdf');
       const reporter = new EvidenceReporter({ output: 'pdf', file: pdfFile });
       reporter.onBegin({} as never, {} as never);
       await reporter.onEnd(fullResult);
-      const expectedHtml = path.resolve(pdfFile.replace(/\.pdf$/i, '.html'));
-      expect(mockGoto).toHaveBeenCalledWith(
-        `file://${expectedHtml}`,
-        { waitUntil: 'networkidle' },
-      );
+      const [[gotoUrl]] = mockGoto.mock.calls;
+      expect(gotoUrl).toMatch(/^file:\/\/.*evidence-screenshots-.*\/report\.html$/);
     });
 
-    it('removes the intermediate HTML file after PDF is written', async () => {
+    it('removes the temp directory (HTML + screenshots) after PDF is written', async () => {
       const pdfFile = path.join(tmpDir, 'report.pdf');
       const reporter = new EvidenceReporter({ output: 'pdf', file: pdfFile });
       reporter.onBegin({} as never, {} as never);
       await reporter.onEnd(fullResult);
-      const htmlFile = pdfFile.replace(/\.pdf$/i, '.html');
-      expect(fs.existsSync(htmlFile)).toBe(false);
-    });
-
-    it('removes the sidecar screenshot directory after PDF is written', async () => {
-      const pdfFile = path.join(tmpDir, 'report.pdf');
-      const reporter = new EvidenceReporter({ output: 'pdf', file: pdfFile });
-      reporter.onBegin({} as never, {} as never);
-      await reporter.onEnd(fullResult);
-      const screenshotDir = path.join(tmpDir, 'screenshots');
-      expect(fs.existsSync(screenshotDir)).toBe(false);
+      const [[gotoUrl]] = mockGoto.mock.calls;
+      const tempHtmlPath = gotoUrl.replace('file://', '');
+      const tempDir = path.dirname(tempHtmlPath);
+      expect(fs.existsSync(tempDir)).toBe(false);
     });
 
     it('calls page.pdf() with A4 format and printBackground', async () => {

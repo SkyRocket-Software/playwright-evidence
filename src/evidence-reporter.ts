@@ -7,6 +7,7 @@ import type {
   TestStep,
 } from '@playwright/test/reporter';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { escapeHtml, renderReport } from './html.ts';
 import type { StepRecord, TestRecord } from './html.ts';
@@ -54,9 +55,7 @@ export default class EvidenceReporter implements Reporter {
     this.startTime = new Date();
 
     if (this.options.output === 'pdf') {
-      const outFile = this.resolveOutFile('html');
-      this.screenshotDir = path.join(path.dirname(outFile), 'screenshots');
-      fs.mkdirSync(this.screenshotDir, { recursive: true });
+      this.screenshotDir = fs.mkdtempSync(path.join(os.tmpdir(), 'evidence-screenshots-'));
     }
   }
 
@@ -109,7 +108,7 @@ export default class EvidenceReporter implements Reporter {
           // Write to sidecar dir — never accumulate base64 in memory
           const filename = `screenshot-${++this.screenshotCount}.png`;
           fs.writeFileSync(path.join(this.screenshotDir, filename), buf);
-          screenshotPath = `screenshots/${filename}`;
+          screenshotPath = path.join(this.screenshotDir, filename);
         } else {
           screenshotBase64 = buf.toString('base64');
         }
@@ -144,20 +143,19 @@ export default class EvidenceReporter implements Reporter {
   }
 
   /**
-   * PDF mode: renders HTML with sidecar screenshot references, prints to PDF
-   * via headless Chromium, then removes the HTML and screenshot directory.
+   * PDF mode: renders HTML with sidecar screenshot references into the temp
+   * directory, prints to PDF via headless Chromium, then removes the entire
+   * temp directory (HTML + screenshots). Only the PDF is written to the output dir.
    */
   private async generatePdf(title: string): Promise<void> {
     const html = renderReport(title, this.tests, this.startTime);
-    const htmlPath = this.resolveOutFile('html');
-    fs.mkdirSync(path.dirname(htmlPath), { recursive: true });
+    const htmlPath = path.join(this.screenshotDir, 'report.html');
     fs.writeFileSync(htmlPath, html, 'utf8');
 
     const pdfPath = this.resolveOutFile('pdf');
     await this.writePdf(htmlPath, pdfPath, title, this.startTime);
 
-    // Remove transient HTML and sidecar screenshots — PDF is the deliverable
-    fs.rmSync(htmlPath);
+    // Remove the entire temp directory — HTML and screenshots are transient
     fs.rmSync(this.screenshotDir, { recursive: true });
 
     console.log(`Evidence PDF written to: ${pdfPath}`);
