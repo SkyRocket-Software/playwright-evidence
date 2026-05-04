@@ -17,6 +17,7 @@ const setupStep: StepRecord = {
   title: 'Navigate to login page',
   status: 'pass',
   screenshotBase64: null,
+  screenshotPath: null,
   screenshotLabel: null,
 };
 
@@ -24,6 +25,7 @@ const evidenceStepPass: StepRecord = {
   title: 'Check dashboard loads',
   status: 'pass',
   screenshotBase64: 'abc123base64==',
+  screenshotPath: null,
   screenshotLabel: 'Check dashboard loads',
 };
 
@@ -31,6 +33,7 @@ const evidenceStepFail: StepRecord = {
   title: 'Submit form',
   status: 'fail',
   screenshotBase64: 'xyz789base64==',
+  screenshotPath: null,
   screenshotLabel: 'Submit form',
 };
 
@@ -204,6 +207,24 @@ describe('renderStep', () => {
     const step: StepRecord = { ...evidenceStepPass, screenshotLabel: null };
     const html = renderStep(step, 1);
     expect(html).toContain(`alt="${step.title}"`);
+  });
+
+  it('renders a sidecar path as an img src when screenshotPath is set', () => {
+    const step: StepRecord = {
+      ...evidenceStepPass,
+      screenshotBase64: null,
+      screenshotPath: 'screenshots/screenshot-1.png',
+    };
+    const html = renderStep(step, 1);
+    expect(html).toContain('src="screenshots/screenshot-1.png"');
+    expect(html).not.toContain('data:image/png');
+  });
+
+  it('treats a step as setup (no screenshot) when both screenshotBase64 and screenshotPath are null', () => {
+    const step: StepRecord = { ...evidenceStepPass, screenshotBase64: null, screenshotPath: null };
+    const html = renderStep(step, 1);
+    expect(html).toContain('setup');
+    expect(html).not.toContain('<img');
   });
 
   it('escapes special characters in the step title', () => {

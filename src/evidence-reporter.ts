@@ -1,4 +1,5 @@
 import type {
+  FullResult,
   Reporter,
   Suite,
   TestCase,
@@ -7,27 +8,43 @@ import type {
 } from '@playwright/test/reporter';
 import fs from 'fs';
 import path from 'path';
-import { renderReport } from './html.ts';
+import { escapeHtml, renderReport } from './html.ts';
 import type { StepRecord, TestRecord } from './html.ts';
 
 interface EvidenceReporterOptions {
-  /** Output filename. Default: evidence-report.html */
+  /**
+   * Output mode.
+   * - 'html': self-contained HTML with screenshots embedded as base64 (default)
+   * - 'pdf': screenshots written to a sidecar directory, PDF generated, then
+   *          the HTML and sidecar directory are deleted. Only the PDF is kept.
+   */
+  output?: 'html' | 'pdf';
+  /** Output filename. Default: evidence-report.html (html mode) or evidence-report.pdf (pdf mode) */
   file?: string;
   /** Report heading. Default: Test Evidence Report */
   title?: string;
 }
 
 /**
- * Playwright reporter that produces a single self-contained HTML evidence report.
- * All screenshots are embedded as base64. No external dependencies in the output.
+ * Playwright reporter that produces an evidence report.
+ *
+ * In 'html' mode (default): a single self-contained HTML file with all screenshots
+ * embedded as base64.
+ *
+ * In 'pdf' mode: screenshots are written to a sidecar directory during the run
+ * (avoiding large in-memory base64 blobs), the HTML is rendered referencing those
+ * files, a PDF is generated from the HTML, then the HTML and sidecar directory are
+ * deleted. Only the PDF is kept.
  *
  * Configure via reporter options in playwright.config.ts:
- *   reporter: [['@skyrocket-software/playwright-evidence/reporter', { file: 'my-report.html', title: 'My Report' }]]
+ *   reporter: [['@skyrocket-software/playwright-evidence/reporter', { output: 'pdf', file: 'report.pdf', title: 'My Report' }]]
  */
 export default class EvidenceReporter implements Reporter {
   private tests: TestRecord[] = [];
   private startTime: Date = new Date();
   private options: EvidenceReporterOptions;
+  private screenshotDir: string = '';
+  private screenshotCount: number = 0;
 
   constructor(options: EvidenceReporterOptions = {}) {
     this.options = options;
@@ -35,6 +52,12 @@ export default class EvidenceReporter implements Reporter {
 
   onBegin(_config: unknown, _suite: Suite): void {
     this.startTime = new Date();
+
+    if (this.options.output === 'pdf') {
+      const outFile = this.resolveOutFile('html');
+      this.screenshotDir = path.join(path.dirname(outFile), 'screenshots');
+      fs.mkdirSync(this.screenshotDir, { recursive: true });
+    }
   }
 
   onTestEnd(test: TestCase, result: TestResult): void {
@@ -74,17 +97,26 @@ export default class EvidenceReporter implements Reporter {
 
     const match = attachments.find((a) => a.name === step.title);
     let screenshotBase64: string | null = null;
+    let screenshotPath: string | null = null;
     let screenshotLabel: string | null = null;
 
     if (match) {
       const buf = match.body ?? (match.path ? fs.readFileSync(match.path) : null);
       if (buf) {
-        screenshotBase64 = buf.toString('base64');
         screenshotLabel = match.name;
+
+        if (this.options.output === 'pdf') {
+          // Write to sidecar dir — never accumulate base64 in memory
+          const filename = `screenshot-${++this.screenshotCount}.png`;
+          fs.writeFileSync(path.join(this.screenshotDir, filename), buf);
+          screenshotPath = `screenshots/${filename}`;
+        } else {
+          screenshotBase64 = buf.toString('base64');
+        }
       }
     }
 
-    out.push({ title: step.title, status, screenshotBase64, screenshotLabel });
+    out.push({ title: step.title, status, screenshotBase64, screenshotPath, screenshotLabel });
 
     for (const child of step.steps ?? []) {
       if (child.category === 'test.step') {
@@ -93,14 +125,116 @@ export default class EvidenceReporter implements Reporter {
     }
   }
 
-  onEnd(): void {
+  async onEnd(_result: FullResult): Promise<void> {
     const title = this.options.title ?? 'Test Evidence Report';
-    const html = renderReport(title, this.tests, this.startTime);
 
-    const filename = this.options.file ?? 'evidence-report.html';
-    const outPath = path.resolve(filename);
+    if (this.options.output === 'pdf') {
+      await this.generatePdf(title);
+    } else {
+      this.generateHtml(title);
+    }
+  }
+
+  private generateHtml(title: string): void {
+    const html = renderReport(title, this.tests, this.startTime);
+    const outPath = this.resolveOutFile('html');
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, html, 'utf8');
     console.log(`\nEvidence report written to: ${outPath}`);
+  }
+
+  /**
+   * PDF mode: renders HTML with sidecar screenshot references, prints to PDF
+   * via headless Chromium, then removes the HTML and screenshot directory.
+   */
+  private async generatePdf(title: string): Promise<void> {
+    const html = renderReport(title, this.tests, this.startTime);
+    const htmlPath = this.resolveOutFile('html');
+    fs.mkdirSync(path.dirname(htmlPath), { recursive: true });
+    fs.writeFileSync(htmlPath, html, 'utf8');
+
+    const pdfPath = this.resolveOutFile('pdf');
+    await this.writePdf(htmlPath, pdfPath, title, this.startTime);
+
+    // Remove transient HTML and sidecar screenshots — PDF is the deliverable
+    fs.rmSync(htmlPath);
+    fs.rmSync(this.screenshotDir, { recursive: true });
+
+    console.log(`Evidence PDF written to: ${pdfPath}`);
+  }
+
+  /**
+   * Prints an HTML file to PDF using a headless Chromium browser.
+   * Uses the file:// protocol so no local server is needed — safe for CI.
+   *
+   * @param htmlPath  - Absolute path to the HTML file to print
+   * @param pdfPath   - Absolute path for the PDF output
+   * @param title     - Report title shown in the PDF page header
+   * @param startTime - Run date shown in the PDF page header
+   */
+  private async writePdf(
+    htmlPath: string,
+    pdfPath: string,
+    title: string,
+    startTime: Date,
+  ): Promise<void> {
+    // Dynamic import keeps startup fast when PDF is not requested,
+    // and avoids a hard import that would fail if playwright is absent.
+    const { chromium } = await import('playwright');
+
+    const dateStr = startTime.toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' });
+
+    // Chromium renders header/footer templates in an isolated context — inline
+    // styles only, font-size must be set explicitly (default is 0 = invisible).
+    const headerTemplate = `
+      <div style="width:100%;padding:0 15mm;display:flex;justify-content:space-between;
+                  align-items:center;font-family:Georgia,serif;font-size:9px;color:#555;
+                  border-bottom:1px solid #ddd;">
+        <span>${escapeHtml(title)}</span>
+        <span>${escapeHtml(dateStr)}</span>
+      </div>`;
+
+    const footerTemplate = `
+      <div style="width:100%;padding:0 15mm;display:flex;justify-content:space-between;
+                  align-items:center;font-family:Georgia,serif;font-size:9px;color:#555;
+                  border-top:1px solid #ddd;">
+        <span>Skyrocket Software</span>
+        <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+      </div>`;
+
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage();
+      await page.goto(`file://${htmlPath}`, { waitUntil: 'networkidle' });
+      await page.pdf({
+        path: pdfPath,
+        format: 'A4',
+        printBackground: true,
+        displayHeaderFooter: true,
+        headerTemplate,
+        footerTemplate,
+        // Margins must be large enough to accommodate the header/footer bands.
+        margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
+      });
+    } finally {
+      await browser.close();
+    }
+  }
+
+  /**
+   * Resolves the output file path for a given extension, honouring the `file`
+   * option and defaulting to 'evidence-report.<ext>'.
+   */
+  private resolveOutFile(ext: 'html' | 'pdf'): string {
+    if (this.options.file) {
+      // If file was given, honour it as-is for the primary output mode,
+      // or swap the extension for intermediate files in pdf mode.
+      return path.resolve(
+        ext === this.options.output || this.options.output === undefined
+          ? this.options.file
+          : this.options.file.replace(/\.[^.]+$/, `.${ext}`),
+      );
+    }
+    return path.resolve(`evidence-report.${ext}`);
   }
 }

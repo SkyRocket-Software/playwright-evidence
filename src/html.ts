@@ -5,8 +5,11 @@
 export interface StepRecord {
   title: string;
   status: 'pass' | 'fail';
-  screenshotBase64: string | null;
   screenshotLabel: string | null;
+  /** Set in html mode — base64-encoded PNG embedded directly in the HTML. */
+  screenshotBase64: string | null;
+  /** Set in pdf mode — relative path from the HTML file to the sidecar PNG. */
+  screenshotPath: string | null;
 }
 
 export interface TestRecord {
@@ -221,7 +224,11 @@ export function runDate(date: Date): string {
  * Setup steps (no screenshot) are rendered muted. Evidence steps include a screenshot row.
  */
 export function renderStep(step: StepRecord, index: number): string {
-  if (step.screenshotBase64 === null) {
+  const imgSrc = step.screenshotBase64
+    ? `data:image/png;base64,${step.screenshotBase64}`
+    : step.screenshotPath ?? null;
+
+  if (imgSrc === null) {
     return `
       <tr style="opacity:0.5;">
         <td class="col-num">${index}</td>
@@ -232,7 +239,7 @@ export function renderStep(step: StepRecord, index: number): string {
 
   const screenshotRow = `<tr class="screenshot-row">
           <td colspan="3">
-            <img src="data:image/png;base64,${step.screenshotBase64}" alt="${escapeHtml(step.screenshotLabel ?? step.title)}" />
+            <img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(step.screenshotLabel ?? step.title)}" />
             <p class="screenshot-caption">Screenshot: ${escapeHtml(step.screenshotLabel ?? step.title)}</p>
           </td>
         </tr>`;
