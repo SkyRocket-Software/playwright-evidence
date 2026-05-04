@@ -77,6 +77,63 @@ await evidenceStep(page, testInfo, 'Confirm the dashboard loads', async () => {
 }, { screenshotScale: 'css' });
 ```
 
+## Generating the evidence PDF on every PR
+
+The PDF can be published as a GitHub Actions artifact so reviewers can download it directly from the PR checks page.
+
+### Minimal workflow
+
+```yaml
+# .github/workflows/evidence.yml
+name: Evidence Report
+
+on:
+  pull_request:
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run tests and generate evidence PDF
+        run: npx playwright test
+
+      - name: Upload evidence report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-report
+          path: evidence-report.pdf   # match the 'file' option in playwright.config.ts
+          if-no-files-found: warn
+          retention-days: 90
+```
+
+A few things to note:
+
+- **`if: always()`** — uploads the report even when tests fail, which is when you most need it.
+- **`--with-deps chromium`** — installs the system libraries Chromium needs on Ubuntu; required for PDF generation.
+- **`retention-days`** — set to whatever matches your compliance requirements; GitHub's maximum is 90 days.
+- The `path` in the upload step must match the `file` option you configure in `playwright.config.ts`.
+
+After the workflow runs, the PDF appears under **Artifacts** at the bottom of the Actions run summary page. Anyone with read access to the repository can download it.
+
+### If you already have a CI workflow
+
+Add the two steps — `Install Playwright browsers` and `Upload evidence report` — to your existing job. The upload step is the only addition required if Chromium is already installed.
+
 ## Report format
 
 - Cover page with overall PASS/FAIL status and test count
