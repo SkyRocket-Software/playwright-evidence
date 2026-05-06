@@ -5,8 +5,11 @@
 export interface StepRecord {
   title: string;
   status: 'pass' | 'fail';
-  screenshotBase64: string | null;
   screenshotLabel: string | null;
+  /** Set in html mode — base64-encoded PNG embedded directly in the HTML. */
+  screenshotBase64: string | null;
+  /** Set in pdf mode — relative path from the HTML file to the sidecar PNG. */
+  screenshotPath: string | null;
 }
 
 export interface TestRecord {
@@ -221,7 +224,11 @@ export function runDate(date: Date): string {
  * Setup steps (no screenshot) are rendered muted. Evidence steps include a screenshot row.
  */
 export function renderStep(step: StepRecord, index: number): string {
-  if (step.screenshotBase64 === null) {
+  const imgSrc = step.screenshotBase64
+    ? `data:image/png;base64,${step.screenshotBase64}`
+    : step.screenshotPath ?? null;
+
+  if (imgSrc === null) {
     return `
       <tr style="opacity:0.5;">
         <td class="col-num">${index}</td>
@@ -232,7 +239,7 @@ export function renderStep(step: StepRecord, index: number): string {
 
   const screenshotRow = `<tr class="screenshot-row">
           <td colspan="3">
-            <img src="data:image/png;base64,${step.screenshotBase64}" alt="${escapeHtml(step.screenshotLabel ?? step.title)}" />
+            <img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(step.screenshotLabel ?? step.title)}" />
             <p class="screenshot-caption">Screenshot: ${escapeHtml(step.screenshotLabel ?? step.title)}</p>
           </td>
         </tr>`;
@@ -282,6 +289,38 @@ export function renderTest(test: TestRecord, index: number): string {
 }
 
 /**
+ * Renders a table of contents listing each test with its index and pass/fail status.
+ * Page numbers are not available at render time (Chromium paginates after render),
+ * so the TOC serves as a numbered index only.
+ */
+export function renderToc(tests: TestRecord[]): string {
+  if (tests.length === 0) return '';
+
+  const rows = tests.map((test, i) => {
+    const num = i + 1;
+    const badgeVariant = test.status === 'pass' ? 'pass' : test.status === 'skipped' ? 'skipped' : 'fail';
+    const badgeText = test.status === 'pass' ? 'PASS' : test.status === 'skipped' ? 'SKIP' : 'FAIL';
+    return `
+      <tr>
+        <td class="col-num">${num}</td>
+        <td>${escapeHtml(test.title)}</td>
+        <td class="col-status">${badge(badgeText, badgeVariant)}</td>
+      </tr>`;
+  }).join('\n');
+
+  return `
+    <div class="section toc" style="page-break-after:always;">
+      <div class="section-header">
+        <h2>Contents</h2>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>#</th><th>Test</th><th>Result</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+/**
  * Renders the full evidence report as a self-contained HTML string.
  *
  * @param title     - Report title (shown in cover and <title>)
@@ -294,6 +333,7 @@ export function renderReport(title: string, tests: TestRecord[], startTime: Date
   const total = tests.length;
   const overallStatus = failed === 0 ? 'PASS' : 'FAIL';
 
+  const toc = renderToc(tests);
   const testSections = tests
     .map((t, i) => renderTest(t, i + 1))
     .join('\n');
@@ -307,6 +347,9 @@ export function renderReport(title: string, tests: TestRecord[], startTime: Date
       <div>${passed} of ${total} test${total !== 1 ? 's' : ''} passed</div>
     </div>
   </div>
-  <div class="body">${testSections}</div>
+  <div class="body">
+    ${toc}
+    ${testSections}
+  </div>
 `);
 }

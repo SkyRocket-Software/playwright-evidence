@@ -11,19 +11,26 @@
     "prepare": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "npm run build && playwright test",
+    "lint": "eslint src/ e2e/ playwright.config.ts"
   },
   "files": [
     "dist"
   ],
   "peerDependencies": {
-    "@playwright/test": ">=1.50.0"
+    "@playwright/test": ">=1.50.0",
+    "playwright-core": ">=1.50.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.59.1",
     "@types/node": "^25.6.0",
+    "@vitest/coverage-v8": "^4.1.5",
+    "eslint": "^10.2.1",
     "tsup": "^8.5.1",
     "typescript": "^5.7.3",
+    "typescript-eslint": "^8.59.1",
     "vitest": "^4.1.5"
   }
 }

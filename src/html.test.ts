@@ -6,6 +6,7 @@ import {
   renderReport,
   renderStep,
   renderTest,
+  renderToc,
   runDate,
   stripAnsi,
 } from './html.ts';
@@ -17,6 +18,7 @@ const setupStep: StepRecord = {
   title: 'Navigate to login page',
   status: 'pass',
   screenshotBase64: null,
+  screenshotPath: null,
   screenshotLabel: null,
 };
 
@@ -24,6 +26,7 @@ const evidenceStepPass: StepRecord = {
   title: 'Check dashboard loads',
   status: 'pass',
   screenshotBase64: 'abc123base64==',
+  screenshotPath: null,
   screenshotLabel: 'Check dashboard loads',
 };
 
@@ -31,6 +34,7 @@ const evidenceStepFail: StepRecord = {
   title: 'Submit form',
   status: 'fail',
   screenshotBase64: 'xyz789base64==',
+  screenshotPath: null,
   screenshotLabel: 'Submit form',
 };
 
@@ -206,6 +210,24 @@ describe('renderStep', () => {
     expect(html).toContain(`alt="${step.title}"`);
   });
 
+  it('renders a sidecar path as an img src when screenshotPath is set', () => {
+    const step: StepRecord = {
+      ...evidenceStepPass,
+      screenshotBase64: null,
+      screenshotPath: 'screenshots/screenshot-1.png',
+    };
+    const html = renderStep(step, 1);
+    expect(html).toContain('src="screenshots/screenshot-1.png"');
+    expect(html).not.toContain('data:image/png');
+  });
+
+  it('treats a step as setup (no screenshot) when both screenshotBase64 and screenshotPath are null', () => {
+    const step: StepRecord = { ...evidenceStepPass, screenshotBase64: null, screenshotPath: null };
+    const html = renderStep(step, 1);
+    expect(html).toContain('setup');
+    expect(html).not.toContain('<img');
+  });
+
   it('escapes special characters in the step title', () => {
     const step: StepRecord = { ...setupStep, title: '<Evil> & "Step"' };
     const html = renderStep(step, 1);
@@ -280,6 +302,51 @@ describe('renderTest', () => {
   it('renders no error block when error is null', () => {
     const html = renderTest(passingTest, 1);
     expect(html).not.toContain('error-block');
+  });
+});
+
+// ── renderToc ─────────────────────────────────────────────────────────────────
+
+describe('renderToc', () => {
+  it('returns an empty string when there are no tests', () => {
+    expect(renderToc([])).toBe('');
+  });
+
+  it('lists each test title', () => {
+    const html = renderToc([passingTest, failingTest]);
+    expect(html).toContain('User can log in');
+    expect(html).toContain('Form submits data');
+  });
+
+  it('numbers entries in order', () => {
+    const html = renderToc([passingTest, failingTest]);
+    expect(html).toContain('>1<');
+    expect(html).toContain('>2<');
+  });
+
+  it('renders a PASS badge for a passing test', () => {
+    const html = renderToc([passingTest]);
+    expect(html).toContain('badge-pass');
+    expect(html).toContain('>PASS<');
+  });
+
+  it('renders a FAIL badge for a failing test', () => {
+    const html = renderToc([failingTest]);
+    expect(html).toContain('badge-fail');
+    expect(html).toContain('>FAIL<');
+  });
+
+  it('renders a SKIP badge for a skipped test', () => {
+    const html = renderToc([skippedTest]);
+    expect(html).toContain('badge-skipped');
+    expect(html).toContain('>SKIP<');
+  });
+
+  it('escapes special characters in test titles', () => {
+    const test: TestRecord = { ...passingTest, title: '<script>alert(1)</script>' };
+    const html = renderToc([test]);
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toContain('<script>alert');
   });
 });
 
