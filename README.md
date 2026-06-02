@@ -9,8 +9,40 @@ Two output modes:
 
 ## Install
 
+This package is distributed via GitHub Packages. You will need a GitHub personal access token with `read:packages` scope.
+
+### 1. Configure the registry
+
+Add a `.npmrc` file to the root of your project:
+
+```text
+@skyrocket-software:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+Set the `GITHUB_TOKEN` environment variable to your personal access token, or add it to your CI secrets.
+
+For pnpm, the same `.npmrc` format is supported. Alternatively, you can configure it in `.pnpmfile.cjs` or via `pnpm config`:
+
 ```bash
-npm install --save-dev github:skyrocket-software/playwright-evidence
+pnpm config set @skyrocket-software:registry https://npm.pkg.github.com
+```
+
+### 2. Install the package
+
+```bash
+npm install --save-dev @skyrocket-software/playwright-evidence
+```
+
+PNPM -
+```bash
+pnpm add -D @skyrocket-software/playwright-evidence
+```
+
+NPM -
+
+```bash
+pnpm install --save-dev  @skyrocket-software/playwright-evidence
 ```
 
 Requires `@playwright/test >= 1.50.0` and `playwright-core >= 1.50.0` as peer dependencies. Both are satisfied automatically if you have `@playwright/test` installed.
