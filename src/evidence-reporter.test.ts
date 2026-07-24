@@ -10,14 +10,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockPdf = vi.fn().mockResolvedValue(undefined);
 const mockGoto = vi.fn().mockResolvedValue(undefined);
-const mockPage = { goto: mockGoto, pdf: mockPdf };
+const mockContextClose = vi.fn().mockResolvedValue(undefined);
+const mockContext = vi.fn().mockReturnValue({ close: mockContextClose });
+const mockPage = { goto: mockGoto, pdf: mockPdf, context: mockContext };
 const mockNewPage = vi.fn().mockResolvedValue(mockPage);
 const mockClose = vi.fn().mockResolvedValue(undefined);
 const mockBrowser = { newPage: mockNewPage, close: mockClose };
 const mockLaunch = vi.fn().mockResolvedValue(mockBrowser);
+const mockConnectOverCDP = vi.fn().mockResolvedValue(mockBrowser);
 
 vi.mock('playwright-core', () => ({
-  chromium: { launch: mockLaunch },
+  chromium: { launch: mockLaunch, connectOverCDP: mockConnectOverCDP },
 }));
 
 // Dynamic import so the vi.mock above takes effect first.
@@ -187,6 +190,258 @@ describe('EvidenceReporter', () => {
       reporter.onBegin({} as never, {} as never);
       await expect(reporter.onEnd(fullResult)).rejects.toThrow('render failed');
       expect(mockClose).toHaveBeenCalledOnce();
+    });
+
+    it('closes the page context before disconnecting the browser', async () => {
+      const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf') });
+      reporter.onBegin({} as never, {} as never);
+      await reporter.onEnd(fullResult);
+      expect(mockContextClose).toHaveBeenCalledOnce();
+      const contextCloseOrder = mockContextClose.mock.invocationCallOrder[0];
+      const browserCloseOrder = mockClose.mock.invocationCallOrder[0];
+      expect(contextCloseOrder).toBeLessThan(browserCloseOrder);
+    });
+
+    it('closes the page context even if pdf() throws', async () => {
+      mockPdf.mockRejectedValueOnce(new Error('render failed'));
+      const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf') });
+      reporter.onBegin({} as never, {} as never);
+      await expect(reporter.onEnd(fullResult)).rejects.toThrow('render failed');
+      expect(mockContextClose).toHaveBeenCalledOnce();
+    });
+
+    describe('cdpEndpoint option', () => {
+      it('connects via CDP instead of launching a new browser when set', async () => {
+        const reporter = new EvidenceReporter({
+          output: 'pdf',
+          file: path.join(tmpDir, 'report.pdf'),
+          cdpEndpoint: 'http://localhost:9222',
+        });
+        reporter.onBegin({} as never, {} as never);
+        await reporter.onEnd(fullResult);
+        expect(mockConnectOverCDP).toHaveBeenCalledWith('http://localhost:9222');
+        expect(mockLaunch).not.toHaveBeenCalled();
+      });
+
+      it('launches a new browser as before when cdpEndpoint is not set', async () => {
+        const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf') });
+        reporter.onBegin({} as never, {} as never);
+        await reporter.onEnd(fullResult);
+        expect(mockLaunch).toHaveBeenCalledOnce();
+        expect(mockConnectOverCDP).not.toHaveBeenCalled();
+      });
+
+      it('wraps a CDP connection failure with the endpoint and a remediation hint', async () => {
+        mockConnectOverCDP.mockRejectedValueOnce(new Error('connect ECONNREFUSED 127.0.0.1:9222'));
+        const reporter = new EvidenceReporter({
+          output: 'pdf',
+          file: path.join(tmpDir, 'report.pdf'),
+          cdpEndpoint: 'http://localhost:9222',
+        });
+        reporter.onBegin({} as never, {} as never);
+        await expect(reporter.onEnd(fullResult)).rejects.toThrow(
+          /Failed to connect to CDP endpoint "http:\/\/localhost:9222".*connect ECONNREFUSED 127\.0\.0\.1:9222.*Chromium instance is listening/s,
+        );
+      });
+
+      it('does not attempt to close a browser that was never connected', async () => {
+        mockConnectOverCDP.mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
+        const reporter = new EvidenceReporter({
+          output: 'pdf',
+          file: path.join(tmpDir, 'report.pdf'),
+          cdpEndpoint: 'http://localhost:9222',
+        });
+        reporter.onBegin({} as never, {} as never);
+        await expect(reporter.onEnd(fullResult)).rejects.toThrow();
+        expect(mockClose).not.toHaveBeenCalled();
+      });
+
+      it('rejects an empty cdpEndpoint at construction time', () => {
+        expect(() => new EvidenceReporter({ output: 'pdf', cdpEndpoint: '' })).toThrow(/non-empty URL/);
+      });
+
+      it('rejects a cdpEndpoint with no URL scheme at construction time', () => {
+        expect(() => new EvidenceReporter({ output: 'pdf', cdpEndpoint: 'localhost:9222' })).toThrow(
+          /scheme "localhost:" is not supported/,
+        );
+      });
+
+      it('rejects a cdpEndpoint that is not a URL at construction time', () => {
+        expect(() => new EvidenceReporter({ output: 'pdf', cdpEndpoint: 'not a url' })).toThrow(
+          /Invalid cdpEndpoint "not a url"/,
+        );
+      });
+
+      it('accepts a ws: scheme endpoint', async () => {
+        const reporter = new EvidenceReporter({
+          output: 'pdf',
+          file: path.join(tmpDir, 'report.pdf'),
+          cdpEndpoint: 'ws://127.0.0.1:9222/devtools/browser/abc',
+        });
+        reporter.onBegin({} as never, {} as never);
+        await reporter.onEnd(fullResult);
+        expect(mockConnectOverCDP).toHaveBeenCalledWith('ws://127.0.0.1:9222/devtools/browser/abc');
+      });
+
+      it('does not throw when cdpEndpoint is omitted', () => {
+        expect(() => new EvidenceReporter({ output: 'pdf' })).not.toThrow();
+      });
+    });
+
+    describe('cdpTimeout option', () => {
+      it('passes the configured timeout through to connectOverCDP', async () => {
+        const reporter = new EvidenceReporter({
+          output: 'pdf',
+          file: path.join(tmpDir, 'report.pdf'),
+          cdpEndpoint: 'http://localhost:9222',
+          cdpTimeout: 5000,
+        });
+        reporter.onBegin({} as never, {} as never);
+        await reporter.onEnd(fullResult);
+        expect(mockConnectOverCDP).toHaveBeenCalledWith('http://localhost:9222', { timeout: 5000 });
+      });
+
+      it('omits the options argument to connectOverCDP when cdpTimeout is not set', async () => {
+        const reporter = new EvidenceReporter({
+          output: 'pdf',
+          file: path.join(tmpDir, 'report.pdf'),
+          cdpEndpoint: 'http://localhost:9222',
+        });
+        reporter.onBegin({} as never, {} as never);
+        await reporter.onEnd(fullResult);
+        expect(mockConnectOverCDP).toHaveBeenCalledWith('http://localhost:9222');
+      });
+
+      it('is ignored when cdpEndpoint is not set', async () => {
+        const reporter = new EvidenceReporter({
+          output: 'pdf',
+          file: path.join(tmpDir, 'report.pdf'),
+          cdpTimeout: 5000,
+        });
+        reporter.onBegin({} as never, {} as never);
+        await reporter.onEnd(fullResult);
+        expect(mockLaunch).toHaveBeenCalledOnce();
+        expect(mockConnectOverCDP).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  // ── requirements option ─────────────────────────────────────────────────────
+
+  describe('requirements option', () => {
+    const passingResult = { status: 'passed', errors: [], steps: [], attachments: [] } as never;
+
+    it('lists a matched requirement under its test section, with full description text', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in with valid credentials' },
+      });
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('Requirements proven');
+      expect(content).toContain('FR-LOGIN-1');
+      expect(content).toContain('Users can log in with valid credentials');
+    });
+
+    it('strips a leading "@" from tags before matching against the requirements map', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in' },
+      });
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('FR-LOGIN-1');
+    });
+
+    it('ignores tags with no matching entry in the requirements map', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in' },
+      });
+      reporter.onTestEnd({ title: 'Unrelated test', tags: ['@not-a-requirement'] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).not.toContain('Requirements proven');
+    });
+
+    it('renders the Requirements Traceability Matrix when requirements is set', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in' },
+      });
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('Requirements Traceability Matrix');
+    });
+
+    it('renders no traceability matrix when requirements is omitted, matching pre-patch output', async () => {
+      const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      reporter.onTestEnd({ title: 'Login test', tags: [] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).not.toContain('Requirements Traceability Matrix');
+      expect(content).not.toContain('Requirements proven');
+    });
+
+    it('lists every requirement matched by a test tagged with more than one requirement', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in', 'FR-LOGIN-2': 'Users can log out' },
+      });
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1', '@FR-LOGIN-2'] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('FR-LOGIN-1');
+      expect(content).toContain('FR-LOGIN-2');
+    });
+
+    it('lists a duplicated tag only once, rather than repeating the requirement', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in' },
+      });
+      reporter.onTestEnd(
+        { title: 'Login test', tags: ['@FR-LOGIN-1', '@FR-LOGIN-1'] } as never,
+        passingResult,
+      );
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content.match(/FR-LOGIN-1/g)?.length).toBe(2); // once in the per-test list, once in the matrix
+    });
+
+    it('rolls up FAIL in the traceability matrix when one of two tests covering a requirement fails', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in' },
+      });
+      const failingResult = { status: 'failed', errors: [], steps: [], attachments: [] } as never;
+      reporter.onTestEnd({ title: 'Login via form', tags: ['@FR-LOGIN-1'] } as never, passingResult);
+      reporter.onTestEnd({ title: 'Login via SSO', tags: ['@FR-LOGIN-1'] } as never, failingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      const matrixSection = content.slice(content.indexOf('Requirements Traceability Matrix'));
+      expect(matrixSection).toContain('Login via form');
+      expect(matrixSection).toContain('Login via SSO');
+      expect(matrixSection).toContain('>FAIL<');
     });
   });
 });
