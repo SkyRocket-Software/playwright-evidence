@@ -12,6 +12,35 @@ import path from 'path';
 import { escapeHtml, renderReport } from './html.ts';
 import type { StepRecord, TestRecord } from './html.ts';
 
+/**
+ * Formats a date (in UTC) as a filesystem-safe, sortable timestamp (YYYYMMDD-HHmmss)
+ * for use in output filenames. Uses UTC rather than local time so a DST transition
+ * can't produce the same wall-clock time twice for two genuinely different instants.
+ */
+export function formatTimestamp(date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  const datePart = `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}`;
+  const timePart = `${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}`;
+  return `${datePart}-${timePart}`;
+}
+
+/**
+ * Short random suffix so filenames stay unique even when two runs resolve their
+ * output path within the same second (e.g. parallel CI shards) — the timestamp
+ * alone only has one-second resolution and can't disambiguate those on its own.
+ */
+function randomSuffix(): string {
+  return Math.floor(Math.random() * 36 ** 6).toString(36).padStart(6, '0');
+}
+
+/** Inserts a suffix before the extension of a file path, e.g. 'report.pdf' -> 'report-20260724-143005-a1b2c3.pdf'. */
+function insertSuffix(filePath: string, suffix: string): string {
+  const ext = path.extname(filePath);
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath, ext);
+  return path.join(dir, `${base}-${suffix}${ext}`);
+}
+
 interface EvidenceReporterOptions {
   /**
    * Output mode.
@@ -20,8 +49,20 @@ interface EvidenceReporterOptions {
    *          the HTML and sidecar directory are deleted. Only the PDF is kept.
    */
   output?: 'html' | 'pdf';
-  /** Output filename. Default: evidence-report.html (html mode) or evidence-report.pdf (pdf mode) */
+  /**
+   * Output filename. Default: evidence-report.html (html mode) or evidence-report.pdf (pdf mode).
+   * A run timestamp plus a short random suffix is always appended before the extension,
+   * e.g. `file: 'report.pdf'` produces `report-20260724-143005-a1b2c3.pdf`, so repeated
+   * runs — including ones that start within the same second — never overwrite each other.
+   */
   file?: string;
+  /**
+   * When true, skips the timestamp and random suffix and always writes to the
+   * exact `file` path (or the default 'evidence-report.<ext>') — each run
+   * overwrites the last, giving a stable "latest" path instead of a unique
+   * one per run. Default: false.
+   */
+  latest?: boolean;
   /** Report heading. Default: Test Evidence Report */
   title?: string;
 }
@@ -43,6 +84,7 @@ interface EvidenceReporterOptions {
 export default class EvidenceReporter implements Reporter {
   private tests: TestRecord[] = [];
   private startTime: Date = new Date();
+  private runId: string = randomSuffix();
   private options: EvidenceReporterOptions;
   private screenshotDir: string = '';
   private screenshotCount: number = 0;
@@ -221,18 +263,24 @@ export default class EvidenceReporter implements Reporter {
 
   /**
    * Resolves the output file path for a given extension, honouring the `file`
-   * option and defaulting to 'evidence-report.<ext>'.
+   * option (defaulting to 'evidence-report.<ext>'). Unless `latest` is set,
+   * always appends a run timestamp plus a random suffix before the extension
+   * so repeated runs — even concurrent ones started within the same second —
+   * don't overwrite each other.
    */
   private resolveOutFile(ext: 'html' | 'pdf'): string {
-    if (this.options.file) {
-      // If file was given, honour it as-is for the primary output mode,
-      // or swap the extension for intermediate files in pdf mode.
-      return path.resolve(
-        ext === this.options.output || this.options.output === undefined
+    const rawFile = this.options.file
+      ? // If file was given, honour it as-is for the primary output mode,
+        // or swap the extension for intermediate files in pdf mode.
+        (ext === this.options.output || this.options.output === undefined
           ? this.options.file
-          : this.options.file.replace(/\.[^.]+$/, `.${ext}`),
-      );
+          : this.options.file.replace(/\.[^.]+$/, `.${ext}`))
+      : `evidence-report.${ext}`;
+
+    if (this.options.latest) {
+      return path.resolve(rawFile);
     }
-    return path.resolve(`evidence-report.${ext}`);
+
+    return path.resolve(insertSuffix(rawFile, `${formatTimestamp(this.startTime)}-${this.runId}`));
   }
 }

@@ -9,7 +9,7 @@
 
 ## Structure
 
-```
+```text
 src/
   html.ts              # HTML rendering: escapeHtml, stripAnsi, badge, htmlDocument, runDate, renderStep, renderTest, renderReport
   evidence-reporter.ts # Playwright Reporter implementation — writes output on onEnd()
@@ -45,7 +45,8 @@ playwright.config.ts   # Playwright config for the POC e2e tests (output: pdf)
 | Option | Default | Description |
 | --- | --- | --- |
 | `output` | `'html'` | `'html'` for self-contained HTML; `'pdf'` for PDF only (sidecar mode) |
-| `file` | `evidence-report.html` / `evidence-report.pdf` | Output filename |
+| `file` | `evidence-report.html` / `evidence-report.pdf` | Output filename. A run timestamp plus a short random suffix is always appended before the extension |
+| `latest` | `false` | When `true`, skips the timestamp/suffix and always writes to the exact `file` path (each run overwrites the last) |
 | `title` | `'Test Evidence Report'` | Report heading |
 
 ## Usage for AI-assisted development

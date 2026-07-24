@@ -4,5 +4,5 @@ coverage/
 e2e-output/
 test-results/
 playwright-report/
-evidence-report.html
-evidence-report.pdf
+evidence-report*.html
+evidence-report*.pdf
