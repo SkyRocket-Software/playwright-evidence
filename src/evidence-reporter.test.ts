@@ -10,17 +10,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockPdf = vi.fn().mockResolvedValue(undefined);
 const mockGoto = vi.fn().mockResolvedValue(undefined);
-const mockContextClose = vi.fn().mockResolvedValue(undefined);
-const mockContext = vi.fn().mockReturnValue({ close: mockContextClose });
-const mockPage = { goto: mockGoto, pdf: mockPdf, context: mockContext };
+const mockPage = { goto: mockGoto, pdf: mockPdf };
 const mockNewPage = vi.fn().mockResolvedValue(mockPage);
 const mockClose = vi.fn().mockResolvedValue(undefined);
 const mockBrowser = { newPage: mockNewPage, close: mockClose };
 const mockLaunch = vi.fn().mockResolvedValue(mockBrowser);
-const mockConnectOverCDP = vi.fn().mockResolvedValue(mockBrowser);
 
 vi.mock('playwright-core', () => ({
-  chromium: { launch: mockLaunch, connectOverCDP: mockConnectOverCDP },
+  chromium: { launch: mockLaunch },
 }));
 
 // Dynamic import so the vi.mock above takes effect first.
@@ -190,139 +187,6 @@ describe('EvidenceReporter', () => {
       reporter.onBegin({} as never, {} as never);
       await expect(reporter.onEnd(fullResult)).rejects.toThrow('render failed');
       expect(mockClose).toHaveBeenCalledOnce();
-    });
-
-    it('closes the page context before disconnecting the browser', async () => {
-      const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf') });
-      reporter.onBegin({} as never, {} as never);
-      await reporter.onEnd(fullResult);
-      expect(mockContextClose).toHaveBeenCalledOnce();
-      const contextCloseOrder = mockContextClose.mock.invocationCallOrder[0];
-      const browserCloseOrder = mockClose.mock.invocationCallOrder[0];
-      expect(contextCloseOrder).toBeLessThan(browserCloseOrder);
-    });
-
-    it('closes the page context even if pdf() throws', async () => {
-      mockPdf.mockRejectedValueOnce(new Error('render failed'));
-      const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf') });
-      reporter.onBegin({} as never, {} as never);
-      await expect(reporter.onEnd(fullResult)).rejects.toThrow('render failed');
-      expect(mockContextClose).toHaveBeenCalledOnce();
-    });
-
-    describe('cdpEndpoint option', () => {
-      it('connects via CDP instead of launching a new browser when set', async () => {
-        const reporter = new EvidenceReporter({
-          output: 'pdf',
-          file: path.join(tmpDir, 'report.pdf'),
-          cdpEndpoint: 'http://localhost:9222',
-        });
-        reporter.onBegin({} as never, {} as never);
-        await reporter.onEnd(fullResult);
-        expect(mockConnectOverCDP).toHaveBeenCalledWith('http://localhost:9222');
-        expect(mockLaunch).not.toHaveBeenCalled();
-      });
-
-      it('launches a new browser as before when cdpEndpoint is not set', async () => {
-        const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf') });
-        reporter.onBegin({} as never, {} as never);
-        await reporter.onEnd(fullResult);
-        expect(mockLaunch).toHaveBeenCalledOnce();
-        expect(mockConnectOverCDP).not.toHaveBeenCalled();
-      });
-
-      it('wraps a CDP connection failure with the endpoint and a remediation hint', async () => {
-        mockConnectOverCDP.mockRejectedValueOnce(new Error('connect ECONNREFUSED 127.0.0.1:9222'));
-        const reporter = new EvidenceReporter({
-          output: 'pdf',
-          file: path.join(tmpDir, 'report.pdf'),
-          cdpEndpoint: 'http://localhost:9222',
-        });
-        reporter.onBegin({} as never, {} as never);
-        await expect(reporter.onEnd(fullResult)).rejects.toThrow(
-          /Failed to connect to CDP endpoint "http:\/\/localhost:9222".*connect ECONNREFUSED 127\.0\.0\.1:9222.*Chromium instance is listening/s,
-        );
-      });
-
-      it('does not attempt to close a browser that was never connected', async () => {
-        mockConnectOverCDP.mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
-        const reporter = new EvidenceReporter({
-          output: 'pdf',
-          file: path.join(tmpDir, 'report.pdf'),
-          cdpEndpoint: 'http://localhost:9222',
-        });
-        reporter.onBegin({} as never, {} as never);
-        await expect(reporter.onEnd(fullResult)).rejects.toThrow();
-        expect(mockClose).not.toHaveBeenCalled();
-      });
-
-      it('rejects an empty cdpEndpoint at construction time', () => {
-        expect(() => new EvidenceReporter({ output: 'pdf', cdpEndpoint: '' })).toThrow(/non-empty URL/);
-      });
-
-      it('rejects a cdpEndpoint with no URL scheme at construction time', () => {
-        expect(() => new EvidenceReporter({ output: 'pdf', cdpEndpoint: 'localhost:9222' })).toThrow(
-          /scheme "localhost:" is not supported/,
-        );
-      });
-
-      it('rejects a cdpEndpoint that is not a URL at construction time', () => {
-        expect(() => new EvidenceReporter({ output: 'pdf', cdpEndpoint: 'not a url' })).toThrow(
-          /Invalid cdpEndpoint "not a url"/,
-        );
-      });
-
-      it('accepts a ws: scheme endpoint', async () => {
-        const reporter = new EvidenceReporter({
-          output: 'pdf',
-          file: path.join(tmpDir, 'report.pdf'),
-          cdpEndpoint: 'ws://127.0.0.1:9222/devtools/browser/abc',
-        });
-        reporter.onBegin({} as never, {} as never);
-        await reporter.onEnd(fullResult);
-        expect(mockConnectOverCDP).toHaveBeenCalledWith('ws://127.0.0.1:9222/devtools/browser/abc');
-      });
-
-      it('does not throw when cdpEndpoint is omitted', () => {
-        expect(() => new EvidenceReporter({ output: 'pdf' })).not.toThrow();
-      });
-    });
-
-    describe('cdpTimeout option', () => {
-      it('passes the configured timeout through to connectOverCDP', async () => {
-        const reporter = new EvidenceReporter({
-          output: 'pdf',
-          file: path.join(tmpDir, 'report.pdf'),
-          cdpEndpoint: 'http://localhost:9222',
-          cdpTimeout: 5000,
-        });
-        reporter.onBegin({} as never, {} as never);
-        await reporter.onEnd(fullResult);
-        expect(mockConnectOverCDP).toHaveBeenCalledWith('http://localhost:9222', { timeout: 5000 });
-      });
-
-      it('omits the options argument to connectOverCDP when cdpTimeout is not set', async () => {
-        const reporter = new EvidenceReporter({
-          output: 'pdf',
-          file: path.join(tmpDir, 'report.pdf'),
-          cdpEndpoint: 'http://localhost:9222',
-        });
-        reporter.onBegin({} as never, {} as never);
-        await reporter.onEnd(fullResult);
-        expect(mockConnectOverCDP).toHaveBeenCalledWith('http://localhost:9222');
-      });
-
-      it('is ignored when cdpEndpoint is not set', async () => {
-        const reporter = new EvidenceReporter({
-          output: 'pdf',
-          file: path.join(tmpDir, 'report.pdf'),
-          cdpTimeout: 5000,
-        });
-        reporter.onBegin({} as never, {} as never);
-        await reporter.onEnd(fullResult);
-        expect(mockLaunch).toHaveBeenCalledOnce();
-        expect(mockConnectOverCDP).not.toHaveBeenCalled();
-      });
     });
   });
 

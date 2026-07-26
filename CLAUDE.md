@@ -29,7 +29,7 @@ playwright.config.ts   # Playwright config for the POC e2e tests (output: pdf)
 - **Two step types** — `setupStep` (no screenshot, muted in report) vs `evidenceStep` (always screenshots, pass/fail badge)
 - **Screenshot scale is configurable** — `evidenceStep` accepts `{ screenshotScale: 'css' | 'device' }` (default `'device'`); use `'css'` to halve screenshot dimensions on retina/HiDPI displays and reduce file size
 - **Screenshot via body buffer** — `page.screenshot()` returns a Buffer passed directly to `testInfo.attach({ body })` in HTML mode, avoiding tmpdir writes; in PDF mode the buffer is written to the sidecar directory instead
-- **Configurable via reporter options** — `output`, `file`, `title`, `cdpEndpoint`, and `requirements` passed in `playwright.config.ts`
+- **Configurable via reporter options** — `output`, `file`, `title`, and `requirements` passed in `playwright.config.ts`
 - **Requirements traceability** — an optional `requirements` map ties test tags to functional requirement IDs, surfacing a per-test "Requirements proven" list and a Requirements Traceability Matrix section with a rolled-up pass/fail/skipped/missed status per requirement
 - **Reporter is opt-in** — consumers add it explicitly to the `reporter` array in their own `playwright.config.ts`
 
@@ -48,7 +48,6 @@ playwright.config.ts   # Playwright config for the POC e2e tests (output: pdf)
 | `output` | `'html'` | `'html'` for self-contained HTML; `'pdf'` for PDF only (sidecar mode) |
 | `file` | `evidence-report.html` / `evidence-report.pdf` | Output filename |
 | `title` | `'Test Evidence Report'` | Report heading |
-| `cdpEndpoint` | `undefined` | PDF mode only. Connects to an already-running Chromium instance via CDP instead of launching a new one — for environments where launching a fresh browser is restricted |
 | `requirements` | `undefined` | Requirement ID -> description map, matched against each test's tags. Adds a per-test "Requirements proven" list and a Requirements Traceability Matrix section |
 
 ## Usage for AI-assisted development

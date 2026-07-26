@@ -72,8 +72,6 @@ export default defineConfig({
 | `output` | `'html'` | `'html'` for self-contained HTML; `'pdf'` for PDF only (sidecar mode) |
 | `file` | `evidence-report.html` / `.pdf` | Output filename |
 | `title` | `'Test Evidence Report'` | Report heading |
-| `cdpEndpoint` | `undefined` | PDF mode only. CDP endpoint (e.g. `'http://localhost:9222'`) of an already-running Chromium instance to connect to instead of launching a new browser process — useful where launching a fresh browser is restricted (e.g. a locked-down sandbox) but connecting to an externally-managed one is not. Must be a URL with an `http:`, `https:`, `ws:`, or `wss:` scheme — validated when the reporter is constructed |
-| `cdpTimeout` | `undefined` | PDF mode only, ignored unless `cdpEndpoint` is set. Maximum time in milliseconds to wait for the CDP connection before failing. Defaults to Playwright's own 30000ms |
 | `requirements` | `undefined` | Maps a functional requirement ID (matched against each test's tags, leading `@` stripped) to its prose description. When set, each test's section lists the requirement(s) it proves, and a Requirements Traceability Matrix section lists every requirement, its covering test(s), and a rolled-up pass/fail/skipped/missed status |
 
 #### Supplying `requirements` from a file

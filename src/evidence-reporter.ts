@@ -25,21 +25,6 @@ interface EvidenceReporterOptions {
   /** Report heading. Default: Test Evidence Report */
   title?: string;
   /**
-   * PDF mode only. CDP endpoint (e.g. 'http://localhost:9222') of an already-running
-   * Chromium instance to connect to via chromium.connectOverCDP(), instead of launching
-   * a new browser process via chromium.launch(). Useful in environments where launching
-   * a fresh browser process is restricted (e.g. a locked-down sandbox) but connecting to
-   * an externally-managed instance is not. Must be a URL with an http:, https:, ws:, or
-   * wss: scheme — validated at construction time. Default: undefined (launches a new browser).
-   */
-  cdpEndpoint?: string;
-  /**
-   * PDF mode only, ignored unless `cdpEndpoint` is set. Maximum time in milliseconds to
-   * wait for the CDP connection to be established, passed through to
-   * chromium.connectOverCDP(). Default: undefined (Playwright's own default of 30000ms).
-   */
-  cdpTimeout?: number;
-  /**
    * Maps a functional requirement ID (matched against each test's tags, with any
    * leading "@" stripped — e.g. a test tagged `@FR-CHANNEL-1` matches the key
    * `'FR-CHANNEL-1'`) to that requirement's prose description. When provided:
@@ -78,41 +63,6 @@ export default class EvidenceReporter implements Reporter {
 
   constructor(options: EvidenceReporterOptions = {}) {
     this.options = options;
-    this.validateCdpEndpoint();
-  }
-
-  /**
-   * Fails fast at construction time — before the test run starts — when
-   * `cdpEndpoint` is set but is not a URL with a scheme Chromium's CDP
-   * transport actually supports. Without this, a typo (e.g. a bare
-   * 'localhost:9222' with no scheme, which `new URL()` alone accepts) would
-   * only surface as an opaque connection failure after the whole suite ran.
-   */
-  private validateCdpEndpoint(): void {
-    const { cdpEndpoint } = this.options;
-    if (cdpEndpoint === undefined) return;
-
-    if (cdpEndpoint.trim() === '') {
-      throw new Error(
-        "Invalid cdpEndpoint: expected a non-empty URL (e.g. 'http://localhost:9222'), got an empty string.",
-      );
-    }
-
-    let parsed: URL;
-    try {
-      parsed = new URL(cdpEndpoint);
-    } catch {
-      throw new Error(
-        `Invalid cdpEndpoint "${cdpEndpoint}": expected a valid URL (e.g. 'http://localhost:9222' or 'ws://127.0.0.1:9222/devtools/browser/<id>').`,
-      );
-    }
-
-    const supportedProtocols = ['http:', 'https:', 'ws:', 'wss:'];
-    if (!supportedProtocols.includes(parsed.protocol)) {
-      throw new Error(
-        `Invalid cdpEndpoint "${cdpEndpoint}": scheme "${parsed.protocol}" is not supported — use http:, https:, ws:, or wss:.`,
-      );
-    }
   }
 
   onBegin(_config: unknown, _suite: Suite): void {
@@ -254,15 +204,6 @@ export default class EvidenceReporter implements Reporter {
    * Prints an HTML file to PDF using a headless Chromium browser.
    * Uses the file:// protocol so no local server is needed — safe for CI.
    *
-   * If `options.cdpEndpoint` is set, connects to that already-running Chromium
-   * instance via connectOverCDP() instead of launching a new browser process —
-   * for environments where launching a fresh browser is restricted but
-   * connecting to an externally-managed one is not. That instance is long-lived
-   * and shared, so the page's browser context is explicitly closed before
-   * disconnecting — browser.close() alone only disconnects (rather than killing
-   * the process) for a CDP-connected browser, and would otherwise leave the
-   * context behind for the lifetime of that shared instance.
-   *
    * @param htmlPath  - Absolute path to the HTML file to print
    * @param pdfPath   - Absolute path for the PDF output
    * @param title     - Report title shown in the PDF page header
@@ -298,59 +239,22 @@ export default class EvidenceReporter implements Reporter {
         <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
       </div>`;
 
-    const browser = await this.connectOrLaunch(chromium);
+    const browser = await chromium.launch();
     try {
       const page = await browser.newPage();
-      try {
-        await page.goto(`file://${htmlPath}`, { waitUntil: 'networkidle' });
-        await page.pdf({
-          path: pdfPath,
-          format: 'A4',
-          printBackground: true,
-          displayHeaderFooter: true,
-          headerTemplate,
-          footerTemplate,
-          // Margins must be large enough to accommodate the header/footer bands.
-          margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
-        });
-      } finally {
-        // Explicit even in launch mode (where it's a no-op ahead of the process
-        // teardown below) so CDP mode never leaves a context behind.
-        await page.context().close();
-      }
+      await page.goto(`file://${htmlPath}`, { waitUntil: 'networkidle' });
+      await page.pdf({
+        path: pdfPath,
+        format: 'A4',
+        printBackground: true,
+        displayHeaderFooter: true,
+        headerTemplate,
+        footerTemplate,
+        // Margins must be large enough to accommodate the header/footer bands.
+        margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
+      });
     } finally {
       await browser.close();
-    }
-  }
-
-  /**
-   * Connects to `options.cdpEndpoint` via connectOverCDP() when set, otherwise
-   * launches a fresh browser. Connection failures against a CDP endpoint are
-   * rewrapped with the endpoint and a remediation hint — Playwright's raw
-   * error (e.g. a bare ECONNREFUSED) doesn't say which endpoint failed or what
-   * to do about it.
-   */
-  private async connectOrLaunch(
-    chromium: typeof import('playwright-core').chromium,
-  ): Promise<import('playwright-core').Browser> {
-    if (!this.options.cdpEndpoint) {
-      return chromium.launch();
-    }
-
-    const connectOptions =
-      this.options.cdpTimeout !== undefined ? { timeout: this.options.cdpTimeout } : undefined;
-
-    try {
-      return connectOptions
-        ? await chromium.connectOverCDP(this.options.cdpEndpoint, connectOptions)
-        : await chromium.connectOverCDP(this.options.cdpEndpoint);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `Failed to connect to CDP endpoint "${this.options.cdpEndpoint}": ${message}. ` +
-          'Ensure a Chromium instance is listening for CDP connections at this address.',
-        { cause: error },
-      );
     }
   }
 
