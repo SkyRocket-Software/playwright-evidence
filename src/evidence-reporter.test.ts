@@ -36,9 +36,9 @@ const fullResult = {
   duration: 0,
 } as const;
 
-/** Matches `<base>-<8 digit date>-<6 digit time>-<6 char random suffix>.<ext>`. */
+/** Matches `<base>-<8 digit date>-<6 digit time>Z-<6 char random suffix>.<ext>`. */
 function suffixedPattern(base: string, ext: string): RegExp {
-  return new RegExp(`^${base}-\\d{8}-\\d{6}-[0-9a-z]{6}\\.${ext}$`);
+  return new RegExp(`^${base}-\\d{8}-\\d{6}Z-[0-9a-z]{6}\\.${ext}$`);
 }
 
 /** Finds the single file in `dir` matching `pattern`, failing the test if there isn't exactly one. */
@@ -51,12 +51,12 @@ function findMatch(dir: string, pattern: RegExp): string {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('formatTimestamp', () => {
-  it('formats a UTC date as YYYYMMDD-HHmmss', () => {
-    expect(formatTimestamp(new Date(Date.UTC(2026, 6, 24, 14, 30, 5)))).toBe('20260724-143005');
+  it('formats a UTC date as YYYYMMDD-HHmmssZ', () => {
+    expect(formatTimestamp(new Date(Date.UTC(2026, 6, 24, 14, 30, 5)))).toBe('20260724-143005Z');
   });
 
   it('zero-pads single-digit month, day, hour, minute, and second', () => {
-    expect(formatTimestamp(new Date(Date.UTC(2026, 0, 5, 3, 2, 1)))).toBe('20260105-030201');
+    expect(formatTimestamp(new Date(Date.UTC(2026, 0, 5, 3, 2, 1)))).toBe('20260105-030201Z');
   });
 
   it('uses UTC rather than local time, so DST or timezone can not shift the date', () => {
@@ -68,10 +68,14 @@ describe('formatTimestamp', () => {
     process.env.TZ = 'Pacific/Kiritimati';
     try {
       const date = new Date(Date.UTC(2026, 0, 1, 23, 30, 0));
-      expect(formatTimestamp(date)).toBe('20260101-233000');
+      expect(formatTimestamp(date)).toBe('20260101-233000Z');
     } finally {
       process.env.TZ = originalTZ;
     }
+  });
+
+  it('marks the timestamp as UTC with a trailing Z, so it is not misread as local time', () => {
+    expect(formatTimestamp(new Date(Date.UTC(2026, 6, 24, 14, 30, 5)))).toMatch(/Z$/);
   });
 });
 
@@ -95,24 +99,28 @@ describe('EvidenceReporter', () => {
   describe('html mode (default)', () => {
     it('writes evidence-report-<timestamp>-<suffix>.html when no file option is set', async () => {
       const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'evidence-report.html') });
+      reporter.onBegin({} as never, {} as never);
       await reporter.onEnd(fullResult);
       findMatch(tmpDir, suffixedPattern('evidence-report', 'html'));
     });
 
     it('writes HTML to the configured file path with a timestamp and random suffix appended', async () => {
       const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'custom-report.html') });
+      reporter.onBegin({} as never, {} as never);
       await reporter.onEnd(fullResult);
       findMatch(tmpDir, suffixedPattern('custom-report', 'html'));
     });
 
     it('creates parent directories that do not exist', async () => {
       const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'nested', 'dir', 'report.html') });
+      reporter.onBegin({} as never, {} as never);
       await reporter.onEnd(fullResult);
       findMatch(path.join(tmpDir, 'nested', 'dir'), suffixedPattern('report', 'html'));
     });
 
     it('writes valid HTML content', async () => {
       const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html'), title: 'My Evidence' });
+      reporter.onBegin({} as never, {} as never);
       await reporter.onEnd(fullResult);
       const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
       const content = fs.readFileSync(outFile, 'utf8');
@@ -122,12 +130,14 @@ describe('EvidenceReporter', () => {
 
     it('does not launch a browser', async () => {
       const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      reporter.onBegin({} as never, {} as never);
       await reporter.onEnd(fullResult);
       expect(mockLaunch).not.toHaveBeenCalled();
     });
 
     it('explicit output: html does not launch a browser', async () => {
       const reporter = new EvidenceReporter({ output: 'html', file: path.join(tmpDir, 'report.html') });
+      reporter.onBegin({} as never, {} as never);
       await reporter.onEnd(fullResult);
       expect(mockLaunch).not.toHaveBeenCalled();
     });
@@ -136,6 +146,7 @@ describe('EvidenceReporter', () => {
       it('writes to the exact configured path, with no timestamp or suffix', async () => {
         const outFile = path.join(tmpDir, 'report.html');
         const reporter = new EvidenceReporter({ file: outFile, latest: true });
+        reporter.onBegin({} as never, {} as never);
         await reporter.onEnd(fullResult);
         expect(fs.existsSync(outFile)).toBe(true);
         expect(fs.readdirSync(tmpDir)).toEqual(['report.html']);
@@ -146,6 +157,7 @@ describe('EvidenceReporter', () => {
         process.chdir(tmpDir);
         try {
           const reporter = new EvidenceReporter({ latest: true });
+          reporter.onBegin({} as never, {} as never);
           await reporter.onEnd(fullResult);
           expect(fs.existsSync(path.join(tmpDir, 'evidence-report.html'))).toBe(true);
         } finally {
@@ -157,10 +169,12 @@ describe('EvidenceReporter', () => {
         const outFile = path.join(tmpDir, 'report.html');
 
         const firstReporter = new EvidenceReporter({ file: outFile, latest: true, title: 'First run' });
+        firstReporter.onBegin({} as never, {} as never);
         await firstReporter.onEnd(fullResult);
         expect(fs.readFileSync(outFile, 'utf8')).toContain('First run');
 
         const secondReporter = new EvidenceReporter({ file: outFile, latest: true, title: 'Second run' });
+        secondReporter.onBegin({} as never, {} as never);
         await secondReporter.onEnd(fullResult);
         expect(fs.readFileSync(outFile, 'utf8')).toContain('Second run');
 
@@ -282,6 +296,14 @@ describe('EvidenceReporter', () => {
       await reporter.onEnd(fullResult);
       const call = mockPdf.mock.calls[0][0];
       expect(call.headerTemplate).toContain('My Custom Report');
+    });
+
+    it('formats the run date in the header template as UTC, so it agrees with the filename timestamp', async () => {
+      const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf') });
+      reporter.onBegin({} as never, {} as never);
+      await reporter.onEnd(fullResult);
+      const call = mockPdf.mock.calls[0][0];
+      expect(call.headerTemplate).toContain('UTC');
     });
 
     it('includes page number and total pages spans in the footer template', async () => {

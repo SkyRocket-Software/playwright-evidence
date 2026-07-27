@@ -164,6 +164,25 @@ describe('runDate', () => {
   it('includes the year', () => {
     expect(runDate(new Date('2025-03-15T10:30:00'))).toContain('2025');
   });
+
+  it('labels the date as UTC, so it is not misread as local time', () => {
+    expect(runDate(new Date('2025-03-15T10:30:00Z'))).toContain('UTC');
+  });
+
+  it('formats in UTC rather than local time, so it always agrees with the filename timestamp', () => {
+    // Pacific/Kiritimati is UTC+14 — far enough that this instant's UTC date
+    // (Jan 1) and local date (Jan 2) fall on different calendar days. If
+    // runDate used local formatting instead of UTC, this would read
+    // 'January 2, 2026' instead.
+    const originalTZ = process.env.TZ;
+    process.env.TZ = 'Pacific/Kiritimati';
+    try {
+      const date = new Date(Date.UTC(2026, 0, 1, 23, 30, 0));
+      expect(runDate(date)).toContain('January 1, 2026');
+    } finally {
+      process.env.TZ = originalTZ;
+    }
+  });
 });
 
 // ── renderStep ────────────────────────────────────────────────────────────────

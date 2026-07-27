@@ -13,15 +13,16 @@ import { escapeHtml, renderReport } from './html.ts';
 import type { StepRecord, TestRecord } from './html.ts';
 
 /**
- * Formats a date (in UTC) as a filesystem-safe, sortable timestamp (YYYYMMDD-HHmmss)
+ * Formats a date (in UTC) as a filesystem-safe, sortable timestamp (YYYYMMDD-HHmmssZ)
  * for use in output filenames. Uses UTC rather than local time so a DST transition
  * can't produce the same wall-clock time twice for two genuinely different instants.
+ * The trailing `Z` marks the timestamp as UTC so it isn't misread as local time.
  */
 export function formatTimestamp(date: Date): string {
   const pad = (value: number): string => String(value).padStart(2, '0');
   const datePart = `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}`;
   const timePart = `${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}`;
-  return `${datePart}-${timePart}`;
+  return `${datePart}-${timePart}Z`;
 }
 
 /**
@@ -83,7 +84,7 @@ interface EvidenceReporterOptions {
  */
 export default class EvidenceReporter implements Reporter {
   private tests: TestRecord[] = [];
-  private startTime: Date = new Date();
+  private startTime!: Date;
   private runId: string = randomSuffix();
   private options: EvidenceReporterOptions;
   private screenshotDir: string = '';
@@ -222,7 +223,9 @@ export default class EvidenceReporter implements Reporter {
     // and avoids a hard import that would fail if playwright is absent.
     const { chromium } = await import('playwright-core');
 
-    const dateStr = startTime.toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' });
+    // UTC so this always agrees with the UTC timestamp in the output filename,
+    // regardless of the local timezone of the machine generating the PDF.
+    const dateStr = `${startTime.toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short', timeZone: 'UTC' })} UTC`;
 
     // Chromium renders header/footer templates in an isolated context — inline
     // styles only, font-size must be set explicitly (default is 0 = invisible).
@@ -269,13 +272,7 @@ export default class EvidenceReporter implements Reporter {
    * don't overwrite each other.
    */
   private resolveOutFile(ext: 'html' | 'pdf'): string {
-    const rawFile = this.options.file
-      ? // If file was given, honour it as-is for the primary output mode,
-        // or swap the extension for intermediate files in pdf mode.
-        (ext === this.options.output || this.options.output === undefined
-          ? this.options.file
-          : this.options.file.replace(/\.[^.]+$/, `.${ext}`))
-      : `evidence-report.${ext}`;
+    const rawFile = this.options.file ?? `evidence-report.${ext}`;
 
     if (this.options.latest) {
       return path.resolve(rawFile);
