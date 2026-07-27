@@ -53,6 +53,8 @@ export function sharedStyles(): string {
       color: #111;
       background: #fff;
       padding: 0;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
 
     /* ── Cover ───────────────────────────────────────────── */
@@ -160,6 +162,12 @@ export function sharedStyles(): string {
       font-style: italic;
     }
 
+    /* ── Table of contents ──────────────────────────────── */
+    .toc a {
+      color: inherit;
+      text-decoration: none;
+    }
+
     /* ── Error block ─────────────────────────────────────── */
     .error-block {
       background: #fff8f8;
@@ -193,8 +201,31 @@ export function sharedStyles(): string {
         padding: 60px 40px;
       }
       .body { padding: 20px 40px; }
-      .section { page-break-inside: avoid; }
+
+      /*
+       * Sections are NOT marked page-break-inside: avoid. A section (a test
+       * with several steps and screenshots) is often taller than one printed
+       * page — asking the renderer to avoid breaking inside something that
+       * can't fit on any single page makes it shove the whole section onto
+       * the next page instead, leaving the previous page mostly blank.
+       * Breaking is controlled at the step level instead (.step-group below),
+       * which is always small enough to keep together.
+       *
+       * Each section DOES start on a fresh page. Without this, a short
+       * section's header/setup rows land at the bottom of one page while its
+       * screenshot (kept together as a step-group) gets bumped whole to the
+       * next, leaving a wasted gap on both pages. Starting every test at the
+       * top of its own page consolidates any leftover space into one place
+       * per test instead of splitting it across two.
+       */
+      .section { page-break-before: always; }
+      .section-header { page-break-after: avoid; }
+      /* Each section now anchors a full page — a bit more weight than the 18px screen size. */
+      .section-header h2 { font-size: 22px; }
+      .step-group { page-break-inside: avoid; }
       .screenshot-row { page-break-inside: avoid; }
+      /* A requirement's "Proven by" list can span several covering tests — keep each row intact. */
+      .traceability tr { page-break-inside: avoid; }
       .screenshot-row img {
         max-width: 100%;
         max-height: 600px;
@@ -202,6 +233,9 @@ export function sharedStyles(): string {
       }
       .cover .summary-box { background: none !important; }
       .error-block { background: none !important; }
+
+      /* Keep at least a few lines of a paragraph/error block together at a page edge. */
+      p, .error-block, .detail-value { orphans: 3; widows: 3; }
     }
   `;
 }
@@ -231,8 +265,14 @@ export function runDate(date: Date): string {
 }
 
 /**
- * Renders a single step row (or setup row) as HTML table row(s).
+ * Renders a single step row (or setup row) as an HTML table row-group.
  * Setup steps (no screenshot) are rendered muted. Evidence steps include a screenshot row.
+ *
+ * Each step is wrapped in its own `<tbody class="step-group">` rather than
+ * sharing one `<tbody>` for the whole test. That gives the print renderer a
+ * small, always-fits-on-one-page unit to apply `page-break-inside: avoid` to,
+ * keeping a step's label and its screenshot together without forcing the
+ * entire (possibly multi-page) test section to avoid breaking too.
  */
 export function renderStep(step: StepRecord, index: number): string {
   const imgSrc = step.screenshotBase64
@@ -241,11 +281,13 @@ export function renderStep(step: StepRecord, index: number): string {
 
   if (imgSrc === null) {
     return `
-      <tr style="opacity:0.5;">
-        <td class="col-num">${index}</td>
-        <td><em>${escapeHtml(step.title)}</em></td>
-        <td class="col-status" style="font-size:11px;color:#888;">setup</td>
-      </tr>`;
+      <tbody class="step-group">
+        <tr style="opacity:0.5;">
+          <td class="col-num">${index}</td>
+          <td><em>${escapeHtml(step.title)}</em></td>
+          <td class="col-status" style="font-size:11px;color:#888;">setup</td>
+        </tr>
+      </tbody>`;
   }
 
   const screenshotRow = `<tr class="screenshot-row">
@@ -256,12 +298,14 @@ export function renderStep(step: StepRecord, index: number): string {
         </tr>`;
 
   return `
-      <tr>
-        <td class="col-num">${index}</td>
-        <td>${escapeHtml(step.title)}</td>
-        <td class="col-status">${badge(step.status === 'pass' ? 'PASS' : 'FAIL', step.status)}</td>
-      </tr>
-      ${screenshotRow}`;
+      <tbody class="step-group">
+        <tr>
+          <td class="col-num">${index}</td>
+          <td>${escapeHtml(step.title)}</td>
+          <td class="col-status">${badge(step.status === 'pass' ? 'PASS' : 'FAIL', step.status)}</td>
+        </tr>
+        ${screenshotRow}
+      </tbody>`;
 }
 
 /**
@@ -301,7 +345,7 @@ export function renderTest(test: TestRecord, index: number): string {
   const requirementsBlock = renderRequirementsList(test.requirements);
 
   return `
-    <div class="section">
+    <div class="section" id="test-${index}">
       <div class="section-header">
         <h2>${index}. ${escapeHtml(test.title)}</h2>
         ${badge(badgeText, badgeVariant)}
@@ -310,7 +354,7 @@ export function renderTest(test: TestRecord, index: number): string {
       ${stepRows
         ? `<table class="data-table">
           <thead><tr><th>#</th><th>Step</th><th>Result</th></tr></thead>
-          <tbody>${stepRows}</tbody>
+          ${stepRows}
         </table>`
         : '<p style="color:#888;font-size:13px;">No recorded steps.</p>'
       }
@@ -320,8 +364,10 @@ export function renderTest(test: TestRecord, index: number): string {
 
 /**
  * Renders a table of contents listing each test with its index and pass/fail status.
- * Page numbers are not available at render time (Chromium paginates after render),
- * so the TOC serves as a numbered index only.
+ * Each row links to its section's anchor (`#test-N`, set by `renderTest`) — Chromium
+ * preserves same-document links as clickable jumps when printing to PDF, so the TOC
+ * doubles as in-document navigation. Page numbers are not available at render time
+ * (Chromium paginates after render), so numbered position is the only static index.
  */
 export function renderToc(tests: TestRecord[]): string {
   if (tests.length === 0) return '';
@@ -333,7 +379,7 @@ export function renderToc(tests: TestRecord[]): string {
     return `
       <tr>
         <td class="col-num">${num}</td>
-        <td>${escapeHtml(test.title)}</td>
+        <td><a href="#test-${num}">${escapeHtml(test.title)}</a></td>
         <td class="col-status">${badge(badgeText, badgeVariant)}</td>
       </tr>`;
   }).join('\n');
