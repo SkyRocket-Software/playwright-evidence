@@ -350,4 +350,123 @@ describe('EvidenceReporter', () => {
       });
     });
   });
+
+  // ── requirements option ─────────────────────────────────────────────────────
+
+  describe('requirements option', () => {
+    const passingResult = { status: 'passed', errors: [], steps: [], attachments: [] } as never;
+
+    it('lists a matched requirement under its test section, with full description text', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in with valid credentials' },
+      });
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('Requirements proven');
+      expect(content).toContain('FR-LOGIN-1');
+      expect(content).toContain('Users can log in with valid credentials');
+    });
+
+    it('strips a leading "@" from tags before matching against the requirements map', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in' },
+      });
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('FR-LOGIN-1');
+    });
+
+    it('ignores tags with no matching entry in the requirements map', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in' },
+      });
+      reporter.onTestEnd({ title: 'Unrelated test', tags: ['@not-a-requirement'] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).not.toContain('Requirements proven');
+    });
+
+    it('renders the Requirements Traceability Matrix when requirements is set', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in' },
+      });
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('Requirements Traceability Matrix');
+    });
+
+    it('renders no traceability matrix when requirements is omitted, matching pre-patch output', async () => {
+      const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      reporter.onTestEnd({ title: 'Login test', tags: [] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).not.toContain('Requirements Traceability Matrix');
+      expect(content).not.toContain('Requirements proven');
+    });
+
+    it('lists every requirement matched by a test tagged with more than one requirement', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in', 'FR-LOGIN-2': 'Users can log out' },
+      });
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1', '@FR-LOGIN-2'] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('FR-LOGIN-1');
+      expect(content).toContain('FR-LOGIN-2');
+    });
+
+    it('lists a duplicated tag only once, rather than repeating the requirement', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in' },
+      });
+      reporter.onTestEnd(
+        { title: 'Login test', tags: ['@FR-LOGIN-1', '@FR-LOGIN-1'] } as never,
+        passingResult,
+      );
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content.match(/FR-LOGIN-1/g)?.length).toBe(2); // once in the per-test list, once in the matrix
+    });
+
+    it('rolls up FAIL in the traceability matrix when one of two tests covering a requirement fails', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in' },
+      });
+      const failingResult = { status: 'failed', errors: [], steps: [], attachments: [] } as never;
+      reporter.onTestEnd({ title: 'Login via form', tags: ['@FR-LOGIN-1'] } as never, passingResult);
+      reporter.onTestEnd({ title: 'Login via SSO', tags: ['@FR-LOGIN-1'] } as never, failingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = path.join(tmpDir, 'report.html');
+      const content = fs.readFileSync(outFile, 'utf8');
+      const matrixSection = content.slice(content.indexOf('Requirements Traceability Matrix'));
+      expect(matrixSection).toContain('Login via form');
+      expect(matrixSection).toContain('Login via SSO');
+      expect(matrixSection).toContain('>FAIL<');
+    });
+  });
 });

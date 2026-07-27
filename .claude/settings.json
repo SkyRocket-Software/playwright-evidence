@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build)",
+      "Bash(npm test)",
+      "Bash(npm run test:e2e)",
+      "Bash(npm run lint)",
+      "Bash(npm run typecheck)",
+      "Bash(npx vitest run * | tail -*)"
+    ]
+  },
+    "sandbox": {
+    "excludedCommands": ["npm run test:e2e", "playwright test", "npx playwright test"]
+  }
+}

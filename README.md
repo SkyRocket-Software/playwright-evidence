@@ -70,6 +70,36 @@ export default defineConfig({
 | `file` | `evidence-report.html` / `.pdf` | Output filename. A run timestamp plus a short random suffix is always appended before the extension, e.g. `report.pdf` becomes `report-20260724-143005-a1b2c3.pdf`, so repeated runs — including ones that start within the same second — never overwrite each other |
 | `latest` | `false` | When `true`, skips the timestamp/suffix and always writes to the exact `file` path, so each run overwrites the last — useful for a stable "latest" link instead of one file per run |
 | `title` | `'Test Evidence Report'` | Report heading |
+| `requirements` | `undefined` | Maps a functional requirement ID (matched against each test's tags, leading `@` stripped) to its prose description. When set, each test's section lists the requirement(s) it proves, and a Requirements Traceability Matrix section lists every requirement, its covering test(s), and a rolled-up pass/fail/skipped/missed status |
+
+#### Supplying `requirements` from a file
+
+`requirements` is a plain `Record<string, string>` — this package has no opinion on where it comes from. A common case is stakeholders (including non-technical ones) maintaining the requirement list outside the codebase, in whatever file format they're comfortable with.
+
+For example, from JSON:
+
+```json
+// requirements.json
+{
+  "FR-LOGIN-1": "Users can log in with valid credentials",
+  "FR-LOGIN-2": "Users can log out"
+}
+```
+
+```ts
+// playwright.config.ts
+import fs from 'fs';
+
+const requirements: Record<string, string> = JSON.parse(fs.readFileSync('requirements.json', 'utf8'));
+
+export default defineConfig({
+  reporter: [
+    ['@skyrocket-software/playwright-evidence/reporter', { output: 'pdf', requirements }],
+  ],
+});
+```
+
+The same pattern works for CSV, YAML, or anything else — read the file and parse it into a `Record<string, string>` before passing it to `requirements`. CSV and YAML both need a parsing library (e.g. `csv-parse`, `yaml`) to handle escaping correctly (quoted fields, embedded commas/colons); JSON needs none, since `JSON.parse` is built in.
 
 ### Step helpers
 

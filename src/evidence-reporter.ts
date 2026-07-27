@@ -10,7 +10,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { escapeHtml, renderReport } from './html.ts';
-import type { StepRecord, TestRecord } from './html.ts';
+import type { RequirementRecord, StepRecord, TestRecord } from './html.ts';
 
 /**
  * Formats a date (in UTC) as a filesystem-safe, sortable timestamp (YYYYMMDD-HHmmssZ)
@@ -66,6 +66,20 @@ interface EvidenceReporterOptions {
   latest?: boolean;
   /** Report heading. Default: Test Evidence Report */
   title?: string;
+  /**
+   * Maps a functional requirement ID (matched against each test's tags, with any
+   * leading "@" stripped — e.g. a test tagged `@FR-CHANNEL-1` matches the key
+   * `'FR-CHANNEL-1'`) to that requirement's prose description. When provided:
+   * - Each test's section in the report lists the requirement(s) it proves, with
+   *   their full text, so the report is readable without a separate requirements
+   *   document open alongside it.
+   * - A Requirements Traceability Matrix section is added, listing every
+   *   requirement in this map (plus any requirement referenced by a test's tags
+   *   but missing from the map), which test(s) cover it, and a rolled-up
+   *   pass/fail/skipped/missed status per requirement.
+   * Default: undefined (no requirements list or matrix is rendered).
+   */
+  requirements?: Record<string, string>;
 }
 
 /**
@@ -127,7 +141,32 @@ export default class EvidenceReporter implements Reporter {
         ? result.errors.map((e) => e.message ?? '').join('\n')
         : null;
 
-    this.tests.push({ title: test.title, status, steps, error });
+    const requirements = this.deriveRequirements(test);
+
+    this.tests.push({ title: test.title, status, steps, error, requirements });
+  }
+
+  /**
+   * Matches this test's tags (with any leading "@" stripped) against the
+   * `requirements` option map, returning the subset that has a known
+   * requirement description. Tags with no matching map entry are ignored —
+   * not every tag is necessarily a requirement ID. A duplicated tag (e.g. a
+   * copy-paste mistake) yields one entry, not a repeated one.
+   */
+  private deriveRequirements(test: TestCase): RequirementRecord[] {
+    const map = this.options.requirements ?? {};
+    const seenIds = new Set<string>();
+    const result: RequirementRecord[] = [];
+
+    for (const tag of test.tags) {
+      const id = tag.startsWith('@') ? tag.slice(1) : tag;
+      if (map[id] && !seenIds.has(id)) {
+        seenIds.add(id);
+        result.push({ id, description: map[id] });
+      }
+    }
+
+    return result;
   }
 
   private collectStep(
@@ -178,7 +217,7 @@ export default class EvidenceReporter implements Reporter {
   }
 
   private generateHtml(title: string): void {
-    const html = renderReport(title, this.tests, this.startTime);
+    const html = renderReport(title, this.tests, this.startTime, this.options.requirements);
     const outPath = this.resolveOutFile('html');
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, html, 'utf8');
@@ -191,7 +230,7 @@ export default class EvidenceReporter implements Reporter {
    * temp directory (HTML + screenshots). Only the PDF is written to the output dir.
    */
   private async generatePdf(title: string): Promise<void> {
-    const html = renderReport(title, this.tests, this.startTime);
+    const html = renderReport(title, this.tests, this.startTime, this.options.requirements);
     const htmlPath = path.join(this.screenshotDir, 'report.html');
     fs.writeFileSync(htmlPath, html, 'utf8');
 

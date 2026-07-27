@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   badge,
+  compareRequirementIds,
+  computeRequirementStatus,
   escapeHtml,
   htmlDocument,
   renderReport,
+  renderRequirementsList,
   renderStep,
   renderTest,
   renderToc,
+  renderTraceabilityMatrix,
   runDate,
   stripAnsi,
 } from './html.ts';
-import type { StepRecord, TestRecord } from './html.ts';
+import type { RequirementRecord, StepRecord, TestRecord } from './html.ts';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -43,6 +47,7 @@ const passingTest: TestRecord = {
   status: 'pass',
   steps: [setupStep, evidenceStepPass],
   error: null,
+  requirements: [],
 };
 
 const failingTest: TestRecord = {
@@ -50,6 +55,7 @@ const failingTest: TestRecord = {
   status: 'fail',
   steps: [evidenceStepFail],
   error: 'Expected "success" but got "error"',
+  requirements: [],
 };
 
 const skippedTest: TestRecord = {
@@ -57,6 +63,12 @@ const skippedTest: TestRecord = {
   status: 'skipped',
   steps: [],
   error: null,
+  requirements: [],
+};
+
+const requirementLogin: RequirementRecord = {
+  id: 'FR-LOGIN-1',
+  description: 'Users can log in with valid credentials',
 };
 
 // ── escapeHtml ────────────────────────────────────────────────────────────────
@@ -255,6 +267,35 @@ describe('renderStep', () => {
   });
 });
 
+// ── renderRequirementsList ───────────────────────────────────────────────────
+
+describe('renderRequirementsList', () => {
+  it('returns an empty string when there are no requirements', () => {
+    expect(renderRequirementsList([])).toBe('');
+  });
+
+  it('renders the requirement id and description', () => {
+    const html = renderRequirementsList([requirementLogin]);
+    expect(html).toContain('Requirements proven');
+    expect(html).toContain('FR-LOGIN-1');
+    expect(html).toContain('Users can log in with valid credentials');
+  });
+
+  it('renders one list item per requirement', () => {
+    const second: RequirementRecord = { id: 'FR-LOGIN-2', description: 'Users can log out' };
+    const html = renderRequirementsList([requirementLogin, second]);
+    expect((html.match(/<li>/g) ?? []).length).toBe(2);
+  });
+
+  it('escapes special characters in id and description', () => {
+    const requirement: RequirementRecord = { id: '<b>FR</b>', description: '<script>alert(1)</script>' };
+    const html = renderRequirementsList([requirement]);
+    expect(html).toContain('&lt;b&gt;FR&lt;/b&gt;');
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(html).not.toContain('<script>alert');
+  });
+});
+
 // ── renderTest ────────────────────────────────────────────────────────────────
 
 describe('renderTest', () => {
@@ -322,6 +363,18 @@ describe('renderTest', () => {
     const html = renderTest(passingTest, 1);
     expect(html).not.toContain('error-block');
   });
+
+  it('renders a requirements list when the test has matched requirements', () => {
+    const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
+    const html = renderTest(test, 1);
+    expect(html).toContain('Requirements proven');
+    expect(html).toContain('FR-LOGIN-1');
+  });
+
+  it('renders no requirements list when the test has none', () => {
+    const html = renderTest(passingTest, 1);
+    expect(html).not.toContain('Requirements proven');
+  });
 });
 
 // ── renderToc ─────────────────────────────────────────────────────────────────
@@ -366,6 +419,113 @@ describe('renderToc', () => {
     const html = renderToc([test]);
     expect(html).toContain('&lt;script&gt;');
     expect(html).not.toContain('<script>alert');
+  });
+});
+
+// ── compareRequirementIds ────────────────────────────────────────────────────
+
+describe('compareRequirementIds', () => {
+  it('sorts numeric suffixes naturally rather than lexicographically', () => {
+    const ids = ['FR-CHANNEL-10', 'FR-CHANNEL-2', 'FR-CHANNEL-1'];
+    expect([...ids].sort(compareRequirementIds)).toEqual(['FR-CHANNEL-1', 'FR-CHANNEL-2', 'FR-CHANNEL-10']);
+  });
+
+  it('falls back to string comparison when prefixes differ', () => {
+    expect(compareRequirementIds('FR-A-1', 'FR-B-1')).toBeLessThan(0);
+  });
+
+  it('falls back to string comparison when an id has no numeric suffix', () => {
+    expect(compareRequirementIds('FR-ALPHA', 'FR-BETA')).toBeLessThan(0);
+  });
+});
+
+// ── computeRequirementStatus ─────────────────────────────────────────────────
+
+describe('computeRequirementStatus', () => {
+  it('returns missed when no test covers the requirement', () => {
+    expect(computeRequirementStatus([])).toBe('missed');
+  });
+
+  it('returns pass when every covering test passed', () => {
+    expect(computeRequirementStatus([{ title: 'a', status: 'pass' }])).toBe('pass');
+  });
+
+  it('returns fail when any covering test failed', () => {
+    expect(computeRequirementStatus([
+      { title: 'a', status: 'pass' },
+      { title: 'b', status: 'fail' },
+    ])).toBe('fail');
+  });
+
+  it('returns skipped when every covering test was skipped', () => {
+    expect(computeRequirementStatus([{ title: 'a', status: 'skipped' }])).toBe('skipped');
+  });
+
+  it('prioritizes fail over an otherwise-skipped set', () => {
+    expect(computeRequirementStatus([
+      { title: 'a', status: 'skipped' },
+      { title: 'b', status: 'fail' },
+    ])).toBe('fail');
+  });
+});
+
+// ── renderTraceabilityMatrix ──────────────────────────────────────────────────
+
+describe('renderTraceabilityMatrix', () => {
+  it('returns an empty string when there are no requirements', () => {
+    expect(renderTraceabilityMatrix([], undefined)).toBe('');
+  });
+
+  it('lists a requirement from the map with no covering test as missed', () => {
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' });
+    expect(html).toContain('Requirements Traceability Matrix');
+    expect(html).toContain('FR-LOGIN-1');
+    expect(html).toContain('No test covers this requirement');
+    expect(html).toContain('MISSED');
+  });
+
+  it('lists the covering test and rolled-up status for a requirement proven by a test', () => {
+    const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
+    const html = renderTraceabilityMatrix([test], { 'FR-LOGIN-1': 'Users can log in with valid credentials' });
+    expect(html).toContain('User can log in');
+    expect(html).toContain('PASS');
+  });
+
+  it('includes a requirement referenced only by a test tag and missing from the map', () => {
+    const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
+    const html = renderTraceabilityMatrix([test], undefined);
+    expect(html).toContain('FR-LOGIN-1');
+  });
+
+  it('sorts requirement rows using natural numeric ordering', () => {
+    const html = renderTraceabilityMatrix([], {
+      'FR-CHANNEL-10': 'Tenth',
+      'FR-CHANNEL-2': 'Second',
+    });
+    expect(html.indexOf('FR-CHANNEL-2')).toBeLessThan(html.indexOf('FR-CHANNEL-10'));
+  });
+
+  it('escapes special characters in the requirement id and description', () => {
+    const html = renderTraceabilityMatrix([], { '<b>FR-1</b>': '<script>alert(1)</script>' });
+    expect(html).toContain('&lt;b&gt;FR-1&lt;/b&gt;');
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(html).not.toContain('<script>alert');
+  });
+
+  it('escapes special characters in a covering test title', () => {
+    const test: TestRecord = { ...passingTest, title: '<script>alert(1)</script>', requirements: [requirementLogin] };
+    const html = renderTraceabilityMatrix([test], undefined);
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(html).not.toContain('<script>alert');
+  });
+
+  it('rolls up FAIL when one of two covering tests fails', () => {
+    const passing: TestRecord = { ...passingTest, requirements: [requirementLogin] };
+    const failing: TestRecord = { ...failingTest, requirements: [requirementLogin] };
+    const html = renderTraceabilityMatrix([passing, failing], { 'FR-LOGIN-1': 'Users can log in' });
+    expect(html).toContain('>FAIL<');
+    expect(html).toContain('User can log in');
+    expect(html).toContain('Form submits data');
   });
 });
 
@@ -415,5 +575,16 @@ describe('renderReport', () => {
     // No failures means overall is PASS
     const html = renderReport('R', [], new Date());
     expect(html).toContain('overall-pass');
+  });
+
+  it('renders no traceability matrix when requirementsMap is omitted', () => {
+    const html = renderReport('R', [passingTest], new Date());
+    expect(html).not.toContain('Requirements Traceability Matrix');
+  });
+
+  it('renders the traceability matrix before the table of contents when requirementsMap is set', () => {
+    const html = renderReport('R', [passingTest], new Date(), { 'FR-LOGIN-1': 'Users can log in' });
+    expect(html).toContain('Requirements Traceability Matrix');
+    expect(html.indexOf('Requirements Traceability Matrix')).toBeLessThan(html.indexOf('Contents'));
   });
 });

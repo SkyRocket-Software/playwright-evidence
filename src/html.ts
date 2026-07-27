@@ -12,11 +12,17 @@ export interface StepRecord {
   screenshotPath: string | null;
 }
 
+export interface RequirementRecord {
+  id: string;
+  description: string;
+}
+
 export interface TestRecord {
   title: string;
   status: 'pass' | 'fail' | 'skipped';
   steps: StepRecord[];
   error: string | null;
+  requirements: RequirementRecord[];
 }
 
 export function escapeHtml(str: string): string {
@@ -259,7 +265,23 @@ export function renderStep(step: StepRecord, index: number): string {
 }
 
 /**
- * Renders a single test section (header, step table, error block) as HTML.
+ * Renders the "Requirements proven" list shown under a test's section heading.
+ * Returns an empty string when the test has no matched requirements.
+ */
+export function renderRequirementsList(requirements: RequirementRecord[]): string {
+  if (requirements.length === 0) return '';
+
+  const items = requirements
+    .map((requirement) => `<li><strong>${escapeHtml(requirement.id)}</strong> — ${escapeHtml(requirement.description)}</li>`)
+    .join('');
+
+  return `
+      <div class="detail-label">Requirements proven</div>
+      <ul style="margin:0 0 16px 20px;font-size:13px;">${items}</ul>`;
+}
+
+/**
+ * Renders a single test section (header, requirements list, step table, error block) as HTML.
  *
  * @param test  - The plain test record to render
  * @param index - 1-based position in the report, used for the section heading
@@ -276,12 +298,15 @@ export function renderTest(test: TestRecord, index: number): string {
     ? `<div class="error-block">${escapeHtml(stripAnsi(test.error))}</div>`
     : '';
 
+  const requirementsBlock = renderRequirementsList(test.requirements);
+
   return `
     <div class="section">
       <div class="section-header">
         <h2>${index}. ${escapeHtml(test.title)}</h2>
         ${badge(badgeText, badgeVariant)}
       </div>
+      ${requirementsBlock}
       ${stepRows
         ? `<table class="data-table">
           <thead><tr><th>#</th><th>Step</th><th>Result</th></tr></thead>
@@ -326,18 +351,117 @@ export function renderToc(tests: TestRecord[]): string {
 }
 
 /**
+ * Natural-sort comparator for requirement IDs sharing a common prefix ending in
+ * a number (e.g. 'FR-CHANNEL-2' before 'FR-CHANNEL-10') — plain string
+ * comparison would otherwise put 'FR-CHANNEL-10' right after 'FR-CHANNEL-1'.
+ * Falls back to a plain string comparison when the prefixes differ or either
+ * ID doesn't end in a number.
+ */
+export function compareRequirementIds(a: string, b: string): number {
+  const matchA = a.match(/^(.*-)(\d+)$/);
+  const matchB = b.match(/^(.*-)(\d+)$/);
+  if (matchA && matchB && matchA[1] === matchB[1]) {
+    return Number(matchA[2]) - Number(matchB[2]);
+  }
+  return a.localeCompare(b);
+}
+
+/**
+ * Rolls up a requirement's status from the tests that cover it: 'missed' when
+ * no test covers it, 'fail' if any covering test failed, 'skipped' if every
+ * covering test was skipped, otherwise 'pass'.
+ */
+export function computeRequirementStatus(
+  coveringTests: Array<{ title: string; status: TestRecord['status'] }>,
+): 'pass' | 'fail' | 'skipped' | 'missed' {
+  if (coveringTests.length === 0) return 'missed';
+  if (coveringTests.some((test) => test.status === 'fail')) return 'fail';
+  if (coveringTests.every((test) => test.status === 'skipped')) return 'skipped';
+  return 'pass';
+}
+
+/**
+ * Renders the Requirements Traceability Matrix section: every requirement from
+ * `requirementsMap` plus any requirement referenced only by a test's tags,
+ * its description, which test(s) cover it, and a rolled-up status. Returns an
+ * empty string when there are no requirements to list.
+ */
+export function renderTraceabilityMatrix(
+  tests: TestRecord[],
+  requirementsMap: Record<string, string> | undefined,
+): string {
+  const map = requirementsMap ?? {};
+  const entries = new Map<string, { description: string; tests: Array<{ title: string; status: TestRecord['status'] }> }>();
+
+  for (const id of Object.keys(map)) {
+    entries.set(id, { description: map[id], tests: [] });
+  }
+
+  for (const test of tests) {
+    for (const requirement of test.requirements) {
+      if (!entries.has(requirement.id)) {
+        entries.set(requirement.id, { description: requirement.description, tests: [] });
+      }
+      entries.get(requirement.id)!.tests.push({ title: test.title, status: test.status });
+    }
+  }
+
+  const ids = Array.from(entries.keys()).sort(compareRequirementIds);
+  if (ids.length === 0) return '';
+
+  const rows = ids.map((id) => {
+    const entry = entries.get(id)!;
+    const status = computeRequirementStatus(entry.tests);
+    const testList = entry.tests.length
+      ? entry.tests.map((test) => `${escapeHtml(test.title)} (${test.status.toUpperCase()})`).join('<br/>')
+      : '<span style="color:#a01010;">No test covers this requirement</span>';
+
+    return `
+      <tr>
+        <td class="col-num" style="width:120px;">${escapeHtml(id)}</td>
+        <td>
+          <div class="detail-value">${escapeHtml(entry.description)}</div>
+          <div class="detail-label">Proven by</div>
+          <div style="font-size:12px;">${testList}</div>
+        </td>
+        <td class="col-status">${badge(status.toUpperCase(), status)}</td>
+      </tr>`;
+  }).join('\n');
+
+  return `
+    <div class="section traceability" style="page-break-after:always;">
+      <div class="section-header">
+        <h2>Requirements Traceability Matrix</h2>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>Requirement</th><th>Description &amp; Covering Tests</th><th>Result</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+/**
  * Renders the full evidence report as a self-contained HTML string.
  *
- * @param title     - Report title (shown in cover and <title>)
- * @param tests     - Ordered list of test records to include
- * @param startTime - When the test run began, shown in the cover
+ * @param title            - Report title (shown in cover and <title>)
+ * @param tests            - Ordered list of test records to include
+ * @param startTime        - When the test run began, shown in the cover
+ * @param requirementsMap  - Optional requirement ID -> description map. When
+ *                           set, a Requirements Traceability Matrix section is
+ *                           rendered after the cover.
  */
-export function renderReport(title: string, tests: TestRecord[], startTime: Date): string {
+export function renderReport(
+  title: string,
+  tests: TestRecord[],
+  startTime: Date,
+  requirementsMap?: Record<string, string>,
+): string {
   const passed = tests.filter((t) => t.status === 'pass').length;
   const failed = tests.filter((t) => t.status === 'fail').length;
   const total = tests.length;
   const overallStatus = failed === 0 ? 'PASS' : 'FAIL';
 
+  const matrix = renderTraceabilityMatrix(tests, requirementsMap);
   const toc = renderToc(tests);
   const testSections = tests
     .map((t, i) => renderTest(t, i + 1))
@@ -353,6 +477,7 @@ export function renderReport(title: string, tests: TestRecord[], startTime: Date
     </div>
   </div>
   <div class="body">
+    ${matrix}
     ${toc}
     ${testSections}
   </div>
