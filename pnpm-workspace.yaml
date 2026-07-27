@@ -1,2 +1,23 @@
+# Packages explicitly permitted (true) or blocked (false) from running build scripts (postinstall etc.).
+# true  — build script is required for the package to function (e.g. native binary downloaders).
+# false — build script is optional or unneeded; package installs but script is skipped.
+# All packages not listed here are blocked by strictDepBuilds below.
 allowBuilds:
   esbuild: true
+
+# Fail the install if any dependency has an unreviewed build script not in allowBuilds.
+strictDepBuilds: true
+
+# Reject packages published less than 7 days ago (10080 minutes).
+# Provides a cooldown buffer against supply chain attacks targeting freshly published versions.
+minimumReleaseAge: 10080
+
+# Resolve transitive dependencies to their highest compatible version.
+# More predictable than the default (lowest-direct) and closer to npm's behaviour.
+resolutionMode: highest
+
+# Suppress known false-positive peer dependency warnings.
+# Only add entries here after confirming the warning is not a real compatibility issue.
+# peerDependencyRules:
+#   ignoreMissing:
+#     - some-peer-package

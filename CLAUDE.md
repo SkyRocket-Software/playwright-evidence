@@ -35,11 +35,11 @@ playwright.config.ts   # Playwright config for the POC e2e tests (output: pdf)
 
 ## Conventions
 
-- **Build step required** — `tsup` compiles to `dist/` (ESM + `.d.ts`); run `npm run build` before publishing. The `prepare` script runs automatically on `npm install`.
+- **Build step required** — `tsup` compiles to `dist/` (ESM + `.d.ts`); run `pnpm run build` before publishing. The `prepare` script runs automatically on `pnpm install`.
 - All exports go through `src/index.ts`; the reporter is also accessible via the `./reporter` export condition (maps to `dist/reporter.js`) for use as a Playwright reporter path
-- ESLint (`eslint.config.js`) with `typescript-eslint` — run `npm run lint`
+- ESLint (`eslint.config.js`) with `typescript-eslint` — run `pnpm run lint`
 - Unit tests use Vitest (`src/**/*.test.ts`); e2e tests use Playwright (`e2e/**/*.spec.ts`)
-- Scripts: `npm test` (unit), `npm run test:e2e` (e2e, builds first), `npm run lint`, `npm run typecheck`
+- Scripts: `pnpm test` (unit), `pnpm run test:e2e` (e2e, builds first), `pnpm run lint`, `pnpm run typecheck`
 
 ## Reporter options
 
