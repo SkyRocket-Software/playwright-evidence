@@ -30,11 +30,8 @@ pnpm config set @skyrocket-software:registry https://npm.pkg.github.com
 
 ### 2. Install the package
 
-```bash
-npm install --save-dev @skyrocket-software/playwright-evidence
-```
-
 PNPM -
+
 ```bash
 pnpm add -D @skyrocket-software/playwright-evidence
 ```
@@ -42,7 +39,7 @@ pnpm add -D @skyrocket-software/playwright-evidence
 NPM -
 
 ```bash
-pnpm install --save-dev  @skyrocket-software/playwright-evidence
+npm install --save-dev @skyrocket-software/playwright-evidence
 ```
 
 Requires `@playwright/test >= 1.50.0` and `playwright-core >= 1.50.0` as peer dependencies. Both are satisfied automatically if you have `@playwright/test` installed.
@@ -129,19 +126,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.0
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run tests and generate evidence PDF
-        run: npx playwright test
+        run: pnpm exec playwright test
 
       - name: Upload evidence report
         if: always()

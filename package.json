@@ -2,6 +2,7 @@
   "name": "@skyrocket-software/playwright-evidence",
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@11.5.0",
   "exports": {
     ".": "./dist/index.js",
     "./reporter": "./dist/reporter.js"
