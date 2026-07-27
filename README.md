@@ -67,7 +67,8 @@ export default defineConfig({
 | Option | Default | Description |
 | --- | --- | --- |
 | `output` | `'html'` | `'html'` for self-contained HTML; `'pdf'` for PDF only (sidecar mode) |
-| `file` | `evidence-report.html` / `.pdf` | Output filename |
+| `file` | `evidence-report.html` / `.pdf` | Output filename. A run timestamp plus a short random suffix is always appended before the extension, e.g. `report.pdf` becomes `report-20260724-143005-a1b2c3.pdf`, so repeated runs — including ones that start within the same second — never overwrite each other |
+| `latest` | `false` | When `true`, skips the timestamp/suffix and always writes to the exact `file` path, so each run overwrites the last — useful for a stable "latest" link instead of one file per run |
 | `title` | `'Test Evidence Report'` | Report heading |
 
 ### Step helpers
@@ -149,7 +150,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: evidence-report
-          path: evidence-report.pdf   # match the 'file' option in playwright.config.ts
+          path: evidence-report-*.pdf   # timestamp suffix added at runtime — glob against the 'file' option's base name
           if-no-files-found: warn
           retention-days: 90
 ```
@@ -159,7 +160,7 @@ A few things to note:
 - **`if: always()`** — uploads the report even when tests fail, which is when you most need it.
 - **`--with-deps chromium`** — installs the system libraries Chromium needs on Ubuntu; required for PDF generation.
 - **`retention-days`** — set to whatever matches your compliance requirements; GitHub's maximum is 90 days.
-- The `path` in the upload step must match the `file` option you configure in `playwright.config.ts`.
+- The `path` in the upload step must glob against the `file` option's base name — the run timestamp appended to the actual filename means it never matches exactly.
 
 After the workflow runs, the PDF appears under **Artifacts** at the bottom of the Actions run summary page. Anyone with read access to the repository can download it.
 

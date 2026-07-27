@@ -215,8 +215,13 @@ ${body}
 </html>`;
 }
 
+/**
+ * Formats a run date for display in the report. Uses UTC so this always agrees
+ * with the UTC timestamp embedded in the output filename (see `formatTimestamp`
+ * in evidence-reporter.ts) regardless of the machine's local timezone.
+ */
 export function runDate(date: Date): string {
-  return date.toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' });
+  return `${date.toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short', timeZone: 'UTC' })} UTC`;
 }
 
 /**
