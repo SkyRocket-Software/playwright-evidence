@@ -68,8 +68,9 @@ When generating Playwright tests for a project that uses this package, follow th
 - Always import `test` from `@playwright/test` and `setupStep`/`evidenceStep` from `@skyrocket-software/playwright-evidence`
 - **One `evidenceStep` per test.** Each test makes exactly one assertion inside one `evidenceStep`. Do not put multiple `evidenceStep` calls in a single test.
 - **`setupStep` is for navigation and preconditions only.** Never put an `expect()` inside a `setupStep`.
-- **Step descriptions must be plain English** readable by a non-technical person. Write them as full sentences starting with a verb: "Confirm the...", "Scroll down to...", "Open the...".
+- **`evidenceStep` descriptions must be plain English** readable by a non-technical person, written as a full sentence starting with a verb: "Confirm the...".
 - The `evidenceStep` description must precisely describe the assertion being made — it will be used as the screenshot label.
+- **`setupStep` descriptions use "Given" framing, not an imperative instruction.** A setup step never gets a screenshot, so phrasing it as a command ("Open the website") reads like an instruction to the reader rather than a record of what the test did — and forcing plain past tense onto a *standing precondition* (as opposed to a discrete action) can read as if it's no longer true. "Given" sidesteps both problems: "Given the website is open", "Given the page has scrolled down to the Contact section", "Given the user has no existing appointments".
 - Do not pass `screenshotScale` unless there is a specific reason to override the default.
 - **Wrap each spec file's tests in one top-level `test.describe(...)` named for the page or feature under test** (e.g. `test.describe('The homepage', () => { ... })`). The report shows this title as a label above each test's own heading, restoring context a leaf test title can lose on its own — "shows the hero heading" reads as a fragment without it. Only nest additional `test.describe` blocks when a file covers more than one distinct sub-scenario worth its own label.
 - **If the project's `playwright.config.ts` passes a `requirements` map to the reporter**, tag every test that proves one of those requirements with `{ tag: '@<requirement-id>' }` (the ID must match a key in the `requirements` map exactly, including case). A test can carry more than one tag if it proves more than one requirement. Do not invent a requirement ID that isn't already a key in the map — ask instead.
@@ -86,7 +87,7 @@ import { setupStep, evidenceStep } from '@skyrocket-software/playwright-evidence
 
 test.describe('The homepage', () => {
   test('page title reads "My App"', async ({ page }, testInfo) => {
-    await setupStep('Open the website', async () => {
+    await setupStep('Given the website is open', async () => {
       await page.goto('/');
     });
 
@@ -96,11 +97,11 @@ test.describe('The homepage', () => {
   });
 
   test('contact email links to the correct mailto address', async ({ page }, testInfo) => {
-    await setupStep('Open the website', async () => {
+    await setupStep('Given the website is open', async () => {
       await page.goto('/');
     });
 
-    await setupStep('Scroll down to the Contact section', async () => {
+    await setupStep('Given the page has scrolled down to the Contact section', async () => {
       await page.locator('#contact').scrollIntoViewIfNeeded();
       await page.waitForTimeout(400);
     });
@@ -127,7 +128,7 @@ test('page title reads "My App"', {
   tag: '@FR-TITLE-1',
   annotation: { type: 'test-id', description: 'TC-TITLE-1' },
 }, async ({ page }, testInfo) => {
-  await setupStep('Open the website', async () => {
+  await setupStep('Given the website is open', async () => {
     await page.goto('/');
   });
 

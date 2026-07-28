@@ -150,17 +150,19 @@ A leaf test title read on its own can lose its subject — "shows the hero headi
 
 Use `setupStep` for navigation and preconditions (rendered muted, no screenshot), and `evidenceStep` for assertions (always captures a screenshot, pass or fail).
 
+Phrase a `setupStep` description as a "Given ..." precondition, not an imperative instruction — it never gets a screenshot, so "Open the website" reads like a command to the reader rather than a record of what happened, and plain past tense ("Opened the website") can read oddly for a *standing* precondition rather than a one-off action (e.g. "Given the user has no existing appointments" holds for the whole test; "Had no existing appointments" implies it might not anymore). `evidenceStep` descriptions stay full imperative-style sentences ("Confirm the...") since they double as the screenshot's caption.
+
 ```ts
 import { expect } from '@playwright/test';
 import { test } from '@playwright/test';
 import { setupStep, evidenceStep } from '@skyrocket-software/playwright-evidence';
 
 test('contact email links to the correct mailto address', async ({ page }, testInfo) => {
-  await setupStep('Open the website', async () => {
+  await setupStep('Given the website is open', async () => {
     await page.goto('/');
   });
 
-  await setupStep('Scroll down to the Contact section', async () => {
+  await setupStep('Given the page has scrolled down to the Contact section', async () => {
     await page.locator('#contact').scrollIntoViewIfNeeded();
     await page.waitForTimeout(400);
   });
