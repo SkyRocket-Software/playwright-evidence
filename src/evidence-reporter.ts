@@ -9,8 +9,8 @@ import type {
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { escapeHtml, renderReport } from './html.ts';
-import type { RequirementRecord, StepRecord, TestRecord } from './html.ts';
+import { escapeHtml, normalizeRequirementInput, renderReport } from './html.ts';
+import type { AboutFeature, RequirementInput, RequirementRecord, StepRecord, TestRecord } from './html.ts';
 
 /**
  * Formats a date (in UTC) as a filesystem-safe, sortable timestamp (YYYYMMDD-HHmmssZ)
@@ -69,17 +69,39 @@ interface EvidenceReporterOptions {
   /**
    * Maps a functional requirement ID (matched against each test's tags, with any
    * leading "@" stripped — e.g. a test tagged `@FR-CHANNEL-1` matches the key
-   * `'FR-CHANNEL-1'`) to that requirement's prose description. When provided:
+   * `'FR-CHANNEL-1'`) to that requirement's prose description — or, to also
+   * declare which `about` feature(s) it supports, a `{ description, features }`
+   * object instead of a bare string. When provided:
    * - Each test's section in the report lists the requirement(s) it proves, with
    *   their full text, so the report is readable without a separate requirements
    *   document open alongside it.
    * - A Requirements Traceability Matrix section is added, listing every
    *   requirement in this map (plus any requirement referenced by a test's tags
-   *   but missing from the map), which test(s) cover it, and a rolled-up
-   *   pass/fail/skipped/missed status per requirement.
+   *   but missing from the map), which test(s) cover it, a rolled-up
+   *   pass/fail/skipped/flaky/missed status per requirement, and — when `about`
+   *   is also set — which feature(s) it supports, linked to their About entry.
    * Default: undefined (no requirements list or matrix is rendered).
    */
-  requirements?: Record<string, string>;
+  requirements?: Record<string, string | RequirementInput>;
+  /**
+   * Maps a feature ID to its title and Markdown body. When provided, renders
+   * an About section between the cover and the Table of Contents — one entry
+   * per feature, in the order given here, each with a rolled-up status badge
+   * (pass/fail/skipped/flaky/missed) aggregated from every test whose matched
+   * requirements list that feature ID in their `features` array. A feature
+   * with no requirements pointing to it (or none of those covered yet) renders
+   * missed, the same way an uncovered requirement does in the Traceability
+   * Matrix. Default: undefined (no About section is rendered).
+   */
+  about?: Record<string, AboutFeature>;
+  /**
+   * Markdown description of the application as a whole, rendered on the cover
+   * page itself (between the run date and the pass/fail summary) — distinct
+   * from `about`, which describes individual features one page each. Same
+   * rendering as an `about` body: raw HTML in the source is escaped, not
+   * passed through. Default: undefined (no overview is rendered).
+   */
+  overview?: string;
 }
 
 /**
@@ -150,8 +172,9 @@ export default class EvidenceReporter implements Reporter {
 
     const requirements = this.deriveRequirements(test);
     const testId = this.deriveTestId(test);
+    const describeTitle = this.deriveDescribeTitle(test);
 
-    this.testRecords.set(test, { title: test.title, status, steps, error, requirements, testId });
+    this.testRecords.set(test, { title: test.title, status, steps, error, requirements, testId, describeTitle });
   }
 
   /**
@@ -185,7 +208,7 @@ export default class EvidenceReporter implements Reporter {
       const id = tag.startsWith('@') ? tag.slice(1) : tag;
       if (map[id] && !seenIds.has(id)) {
         seenIds.add(id);
-        result.push({ id, description: map[id] });
+        result.push({ id, ...normalizeRequirementInput(map[id]) });
       }
     }
 
@@ -202,6 +225,25 @@ export default class EvidenceReporter implements Reporter {
   private deriveTestId(test: TestCase): string | null {
     const annotation = test.annotations.find((a) => a.type === 'test-id');
     return annotation?.description ?? null;
+  }
+
+  /**
+   * Walks the chain of enclosing `test.describe(...)` suites (outermost
+   * first), joining their titles into one label. Suites form a strict
+   * `root -> project -> file -> describe -> ... -> describe -> test`
+   * hierarchy (`Suite.type`), so stopping as soon as a suite isn't a
+   * 'describe' naturally excludes the file, project, and root suites —
+   * only author-written describe titles end up in the label. Returns null
+   * when the test has no enclosing describe block at all.
+   */
+  private deriveDescribeTitle(test: TestCase): string | null {
+    const titles: string[] = [];
+    let suite: Suite | undefined = test.parent;
+    while (suite && suite.type === 'describe') {
+      titles.unshift(suite.title);
+      suite = suite.parent;
+    }
+    return titles.length > 0 ? titles.join(' › ') : null;
   }
 
   private collectStep(
@@ -257,7 +299,7 @@ export default class EvidenceReporter implements Reporter {
   }
 
   private generateHtml(title: string): void {
-    const html = renderReport(title, this.tests, this.startTime, this.options.requirements);
+    const html = renderReport(title, this.tests, this.startTime, this.options.requirements, this.options.about, this.options.overview);
     const outPath = this.resolveOutFile('html');
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, html, 'utf8');
@@ -289,7 +331,7 @@ export default class EvidenceReporter implements Reporter {
     const { chromium } = await import('playwright-core');
     const browser = await chromium.launch();
     try {
-      const draftHtml = renderReport(title, this.tests, this.startTime, this.options.requirements, 'reserve');
+      const draftHtml = renderReport(title, this.tests, this.startTime, this.options.requirements, this.options.about, this.options.overview, 'reserve');
       const draftHtmlPath = path.join(this.screenshotDir, 'report-draft.html');
       fs.writeFileSync(draftHtmlPath, draftHtml, 'utf8');
       const draftPdfPath = path.join(this.screenshotDir, 'report-draft.pdf');
@@ -297,7 +339,7 @@ export default class EvidenceReporter implements Reporter {
 
       const pageNumbers = await this.resolvePageNumbers(draftPdfPath);
 
-      const finalHtml = renderReport(title, this.tests, this.startTime, this.options.requirements, pageNumbers);
+      const finalHtml = renderReport(title, this.tests, this.startTime, this.options.requirements, this.options.about, this.options.overview, pageNumbers);
       const finalHtmlPath = path.join(this.screenshotDir, 'report.html');
       fs.writeFileSync(finalHtmlPath, finalHtml, 'utf8');
       await this.printPdf(browser, finalHtmlPath, pdfPath, title, this.startTime);

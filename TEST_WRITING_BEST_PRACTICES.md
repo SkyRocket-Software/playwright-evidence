@@ -20,6 +20,65 @@ actually met. This document captures the conventions that make that true.
 - Every test function takes `testInfo` as its second argument
   (`async ({ page, loginAsRole }, testInfo) => { ... }`) — `evidenceStep`
   requires it to attach screenshots.
+- Phrase a `setupStep` description as a "Given ..." precondition, not an
+  imperative instruction. `setupStep` never gets a screenshot, so "Open the
+  login page" reads like a command to the reader rather than a record of
+  what happened — and plain past tense ("Opened the login page") can read
+  oddly for a *standing* precondition rather than a one-off action ("Given
+  the user has no existing appointments" holds for the whole test; "Had no
+  existing appointments" implies it might not anymore). `evidenceStep`
+  descriptions keep the full imperative-sentence style ("Confirm the..."),
+  since they double as the screenshot's caption.
+
+### A helper call inside setupStep can still hide evidence
+
+`setupStep` never screenshots, so calling a helper from it hides whatever
+that helper does — including any fill, select, or click the helper performs
+internally. That's fine when the helper's output isn't what this test's
+`@FR-...` tag is about. It's a bug when the helper's output *is* the thing
+the test is meant to prove: the reviewer needs to see it, and `setupStep`
+guarantees they never will.
+
+Before wrapping a helper call in `setupStep`, ask whether its result is what
+this specific test claims. If yes, pull that part out into its own
+`evidenceStep` — even if the same helper is legitimately used as pure setup
+in other tests where its output isn't the point.
+
+```typescript
+// Wrong: this test's FR claim is that a visitor can pick an available date,
+// time, and reason — but setupStep never screenshots, so a reviewer can
+// never see what was actually selected before the flow moves on.
+await setupStep("Given an available date, time, and reason have been picked", async () => {
+  await pickTimeslotAndReason(page);
+});
+
+// Right: the selection gets its own evidenceStep, so the picked values are
+// visible and asserted before the flow continues.
+await evidenceStep(
+  page,
+  testInfo,
+  "Picking the date \"08/03/2026\", timeslot \"9:00 AM\", and reason \"Child support payment\"",
+  async () => {
+    await pickTimeslotAndReason(page);
+    await expect(page.getByLabel("Timeslot")).toHaveValue("09:00:00");
+  },
+);
+```
+
+### One screenshot per test is a warning sign
+
+Count the `evidenceStep`s in a test. If there's only one, it's almost always
+an "after" with no "before" — check what got buried in `setupStep` right
+before it. A single screenshot can only show an end state; it can't prove
+that end state is a *change* from anything, which is what most functional
+requirements actually claim.
+
+This isn't a hard rule — a test whose whole claim is "this static page
+renders correctly" (no form, no prior action, nothing that could have a
+"before") can legitimately have one `evidenceStep`. But treat that as the
+exception to justify, not the default. When in doubt, ask what a reviewer
+would need to see to believe the end state is meaningful, and check whether
+`setupStep` is hiding it.
 
 ## Traceability lives in the test tag, not the step text
 
@@ -68,6 +127,37 @@ requirement this test proves; the ID says which test this is, regardless of
 what it's called today. Don't fold one into the other — a tag isn't a stable
 identifier (its requirement can be re-scoped or removed), and a test ID isn't
 a filter (`--grep` matches tags, not annotations).
+
+## Group related tests under one `test.describe`
+
+Wrap each spec file's tests in one top-level `test.describe(...)`, named for
+the page or feature the file covers:
+
+```typescript
+test.describe("The New Channel form", () => {
+  test("the form is blank when it first opens", async ({ page, loginAsRole }, testInfo) => {
+    // ...
+  });
+
+  test(
+    "submitting valid values creates the channel",
+    {
+      tag: "@FR-CHANNEL-1",
+      annotation: { type: "test-id", description: "TC-CHANNEL-1" },
+    },
+    async ({ page, loginAsRole }, testInfo) => {
+      // ...
+    },
+  );
+});
+```
+
+The report shows the describe title as a label above each test's own heading.
+Without it, a leaf test title read on its own can lose its subject — a title
+like "shows a required-field error" doesn't say what shows it. The describe
+title restores that context without repeating it inside every test's own
+title. Only nest a second `test.describe` when a file covers more than one
+distinct sub-scenario worth its own label.
 
 ## Split every fill-then-submit sequence into atomic steps
 
@@ -185,6 +275,20 @@ test.fixme(
 
 Also log the underlying bug in `TODO.md` with a cross-reference to the
 test, so the gap is tracked in both directions.
+
+## Flaky tests report as FLAKY, not a hidden pass
+
+If `playwright.config.ts` sets `retries` (standard for CI —
+`retries: process.env.CI ? 2 : 0`), a test that fails once and passes on
+retry is marked **FLAKY** in the generated report, not a plain PASS. This is
+automatic; nothing needs to be written differently in the test itself.
+
+Treat a FLAKY result in a report the same way you'd treat a flaky test
+anywhere else — it's evidence of nondeterminism worth investigating, not
+something to wave through because the CI job went green. Log it in
+`TODO.md` with a cross-reference to the test, the same way a skipped test's
+underlying bug gets logged above, rather than letting it recur silently
+across runs.
 
 ## Test titles are part of the report too
 

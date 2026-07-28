@@ -72,6 +72,10 @@ export default defineConfig({
 | `title` | `'Test Evidence Report'` | Report heading |
 | `requirements` | `undefined` | Maps a functional requirement ID (matched against each test's tags, leading `@` stripped) to its prose description. When set, each test's section lists the requirement(s) it proves, and a Requirements Traceability Matrix section lists every requirement, its covering test(s), and a rolled-up pass/fail/skipped/missed status |
 
+#### Flaky tests
+
+If your `playwright.config.ts` sets `retries` (a common CI pattern, e.g. `retries: process.env.CI ? 2 : 0`), a test that fails on its first attempt but passes on a retry is reported as **FLAKY** rather than a plain PASS — its own badge and color, distinct from both PASS and FAIL. The report's overall cover-page status becomes FLAKY too whenever this happens with no other failures (a hard failure still takes priority over a flaky one). This is automatic — nothing needs to be configured or tagged. A flaky test still counts toward the "passed" tally, since it did pass; FLAKY is a visibility signal, not a failure.
+
 #### Supplying `requirements` from a file
 
 `requirements` is a plain `Record<string, string>` — this package has no opinion on where it comes from. A common case is stakeholders (including non-technical ones) maintaining the requirement list outside the codebase, in whatever file format they're comfortable with.
@@ -128,9 +132,25 @@ test('users can log in with valid credentials', {
 
 Unlike a tag (which drives `--grep` filtering and requirement matching) or the test title (which can be reworded freely), a `test-id` annotation exists only to identify the test itself. The report shows it — never invented or renumbered — as an eyebrow above the test's section heading, in the Test Case Index's ID column, and ahead of the title in the Traceability Matrix's covering-test list, so the reference survives the test being renamed, reordered, or resharded. It's optional, but recommended for any test tagged with a requirement.
 
+#### Grouping tests with `test.describe`
+
+Wrapping related tests in a [`test.describe`](https://playwright.dev/docs/api/class-test#test-describe) block adds its title as a label above each test's own heading in the report:
+
+```ts
+test.describe('The homepage', () => {
+  test('shows the hero heading', async ({ page }, testInfo) => {
+    // ...
+  });
+});
+```
+
+A leaf test title read on its own can lose its subject — "shows the hero heading" reads as a fragment without knowing what shows it. The describe title restores that context without repeating it inside every test's own title. Nested `test.describe` blocks join outermost-first (`Parent title › Child title`); a test with no enclosing `test.describe` gets no label. This label only appears on the test's own section — the Test Case Index and Traceability Matrix are sorted by test-id (see above), so a describe's tests aren't grouped together there anyway.
+
 ### Step helpers
 
 Use `setupStep` for navigation and preconditions (rendered muted, no screenshot), and `evidenceStep` for assertions (always captures a screenshot, pass or fail).
+
+Phrase a `setupStep` description as a "Given ..." precondition, not an imperative instruction — it never gets a screenshot, so "Open the website" reads like a command to the reader rather than a record of what happened, and plain past tense ("Opened the website") can read oddly for a *standing* precondition rather than a one-off action (e.g. "Given the user has no existing appointments" holds for the whole test; "Had no existing appointments" implies it might not anymore). `evidenceStep` descriptions stay full imperative-style sentences ("Confirm the...") since they double as the screenshot's caption.
 
 ```ts
 import { expect } from '@playwright/test';
@@ -138,11 +158,11 @@ import { test } from '@playwright/test';
 import { setupStep, evidenceStep } from '@skyrocket-software/playwright-evidence';
 
 test('contact email links to the correct mailto address', async ({ page }, testInfo) => {
-  await setupStep('Open the website', async () => {
+  await setupStep('Given the website is open', async () => {
     await page.goto('/');
   });
 
-  await setupStep('Scroll down to the Contact section', async () => {
+  await setupStep('Given the page has scrolled down to the Contact section', async () => {
     await page.locator('#contact').scrollIntoViewIfNeeded();
     await page.waitForTimeout(400);
   });
@@ -190,7 +210,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -227,13 +247,14 @@ Add the two steps — `Install Playwright browsers` and `Upload evidence report`
 
 ## Report format
 
-- Cover page with overall PASS/FAIL status and test count
+- Cover page with overall PASS/FAIL/FLAKY status and test count
 - Table of Contents linking to the Requirements Traceability Matrix (if `requirements` is set) and every test
-- Requirements Traceability Matrix listing each requirement, its covering test(s), and a rolled-up PASS/FAIL/SKIPPED/MISSED status (if `requirements` is set)
-- Test Case Index listing every test's ID (if annotated), title, and result
-- One section per test with a step table, headed by its `test-id` (if annotated) and the requirement(s) it proves (if tagged)
+- Requirements Traceability Matrix listing each requirement, its covering test(s), and a rolled-up PASS/FAIL/SKIPPED/MISSED/FLAKY status (if `requirements` is set)
+- Test Case Index listing every test's ID (if annotated), title, and result — sorted by test-id, with any test that has no test-id following after, in run order
+- One section per test with a step table, headed by its `test-id` (if annotated), its enclosing `test.describe` title (if any), and the requirement(s) it proves (if tagged)
 - Setup steps rendered as muted/italic rows with no badge
 - Evidence steps rendered with PASS/FAIL badge and an embedded screenshot
+- A test that only passed after a retry is marked FLAKY rather than PASS
 - Error output shown inline for failing tests
 - In PDF mode, every page reference (Table of Contents, Test Case Index, Traceability Matrix) is a real, resolved page number and a clickable link to its target
 - PDF includes page headers (report title, run date) and footers (page X of Y)

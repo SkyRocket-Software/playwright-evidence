@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   badge,
-  compareRequirementIds,
-  computeRequirementStatus,
+  compareNaturalIds,
+  compareTestOrder,
+  computeRollupStatus,
   escapeHtml,
   htmlDocument,
+  normalizeRequirementInput,
+  renderAboutSection,
   renderReport,
   renderRequirementsList,
   renderStep,
@@ -15,7 +18,7 @@ import {
   runDate,
   stripAnsi,
 } from './html.ts';
-import type { RequirementRecord, StepRecord, TestRecord } from './html.ts';
+import type { AboutFeature, RequirementRecord, StepRecord, TestRecord } from './html.ts';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -50,6 +53,7 @@ const passingTest: TestRecord = {
   error: null,
   requirements: [],
   testId: null,
+  describeTitle: null,
 };
 
 const failingTest: TestRecord = {
@@ -59,6 +63,7 @@ const failingTest: TestRecord = {
   error: 'Expected "success" but got "error"',
   requirements: [],
   testId: null,
+  describeTitle: null,
 };
 
 const skippedTest: TestRecord = {
@@ -68,6 +73,7 @@ const skippedTest: TestRecord = {
   error: null,
   requirements: [],
   testId: null,
+  describeTitle: null,
 };
 
 const flakyTest: TestRecord = {
@@ -77,11 +83,13 @@ const flakyTest: TestRecord = {
   error: null,
   requirements: [],
   testId: null,
+  describeTitle: null,
 };
 
 const requirementLogin: RequirementRecord = {
   id: 'FR-LOGIN-1',
   description: 'Users can log in with valid credentials',
+  features: [],
 };
 
 // ── escapeHtml ────────────────────────────────────────────────────────────────
@@ -305,20 +313,20 @@ describe('renderRequirementsList', () => {
   });
 
   it('capitalizes the first letter of the description', () => {
-    const requirement: RequirementRecord = { id: 'FR-LOWER-1', description: 'users can log out' };
+    const requirement: RequirementRecord = { id: 'FR-LOWER-1', description: 'users can log out', features: [] };
     const html = renderRequirementsList([requirement]);
     expect(html).toContain('Users can log out');
     expect(html).not.toContain('users can log out');
   });
 
   it('renders one list item per requirement', () => {
-    const second: RequirementRecord = { id: 'FR-LOGIN-2', description: 'Users can log out' };
+    const second: RequirementRecord = { id: 'FR-LOGIN-2', description: 'Users can log out', features: [] };
     const html = renderRequirementsList([requirementLogin, second]);
     expect((html.match(/<li>/g) ?? []).length).toBe(2);
   });
 
   it('escapes special characters in id and description', () => {
-    const requirement: RequirementRecord = { id: '<b>FR</b>', description: '<script>alert(1)</script>' };
+    const requirement: RequirementRecord = { id: '<b>FR</b>', description: '<script>alert(1)</script>', features: [] };
     const html = renderRequirementsList([requirement]);
     expect(html).toContain('&lt;b&gt;FR&lt;/b&gt;');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
@@ -357,6 +365,32 @@ describe('renderTest', () => {
   it('renders just the title with no id-tag label when testId is null', () => {
     const html = renderTest(passingTest, 1, undefined);
     expect(html).not.toContain('id-tag');
+  });
+
+  it('renders the enclosing describe title as a label above the heading, restoring the sentence\'s subject', () => {
+    const test: TestRecord = { ...passingTest, describeTitle: 'the homepage' };
+    const html = renderTest(test, 1, undefined);
+    expect(html).toContain('<div class="describe-label">The homepage</div>');
+    expect(html.indexOf('The homepage')).toBeLessThan(html.indexOf('<h2>'));
+  });
+
+  it('renders no describe label when the test has no enclosing describe block', () => {
+    const html = renderTest(passingTest, 1, undefined);
+    expect(html).not.toContain('describe-label');
+  });
+
+  it('renders the test-id eyebrow above the describe label, above the heading', () => {
+    const test: TestRecord = { ...passingTest, testId: 'TC-LOGIN-1', describeTitle: 'the homepage' };
+    const html = renderTest(test, 1, undefined);
+    expect(html.indexOf('TC-LOGIN-1')).toBeLessThan(html.indexOf('The homepage'));
+    expect(html.indexOf('The homepage')).toBeLessThan(html.indexOf('<h2>'));
+  });
+
+  it('escapes special characters in the describe label', () => {
+    const test: TestRecord = { ...passingTest, describeTitle: '<script>alert(1)</script>' };
+    const html = renderTest(test, 1, undefined);
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toContain('<script>alert');
   });
 
   it('renders a PASS badge for a passing test', () => {
@@ -544,24 +578,24 @@ describe('renderTestCaseIndex', () => {
 
 describe('renderTableOfContents', () => {
   it('returns an empty string when there is neither a matrix nor any tests', () => {
-    expect(renderTableOfContents(false, false, undefined)).toBe('');
+    expect(renderTableOfContents(false, false, null, undefined)).toBe('');
   });
 
   it('titles the section "Table of Contents"', () => {
-    const html = renderTableOfContents(true, true, undefined);
+    const html = renderTableOfContents(true, true, null, undefined);
     expect(html).toContain('Table of Contents');
   });
 
   it('lists the Requirements Traceability Matrix only when a matrix exists', () => {
-    const withMatrix = renderTableOfContents(true, false, undefined);
-    const withoutMatrix = renderTableOfContents(false, true, undefined);
+    const withMatrix = renderTableOfContents(true, false, null, undefined);
+    const withoutMatrix = renderTableOfContents(false, true, null, undefined);
     expect(withMatrix).toContain('Requirements Traceability Matrix');
     expect(withoutMatrix).not.toContain('Requirements Traceability Matrix');
   });
 
   it('lists the Test Case Index and Test Results only when there are tests', () => {
-    const withTests = renderTableOfContents(false, true, undefined);
-    const withoutTests = renderTableOfContents(true, false, undefined);
+    const withTests = renderTableOfContents(false, true, null, undefined);
+    const withoutTests = renderTableOfContents(true, false, null, undefined);
     expect(withTests).toContain('Test Case Index');
     expect(withTests).toContain('Test Results');
     expect(withoutTests).not.toContain('Test Case Index');
@@ -569,19 +603,19 @@ describe('renderTableOfContents', () => {
   });
 
   it('links each entry to its section anchor', () => {
-    const html = renderTableOfContents(true, true, undefined);
+    const html = renderTableOfContents(true, true, null, undefined);
     expect(html).toContain('href="#requirements-matrix"');
     expect(html).toContain('href="#test-case-index"');
   });
 
   it('links "Test Results" to the first test — there is no standalone Test Results section', () => {
-    const html = renderTableOfContents(true, true, undefined);
+    const html = renderTableOfContents(true, true, null, undefined);
     expect(html).toContain('<a href="#test-1">Test Results</a>');
     expect(html).not.toContain('#test-results');
   });
 
   it('omits the Page column in html mode', () => {
-    const html = renderTableOfContents(true, true, undefined);
+    const html = renderTableOfContents(true, true, null, undefined);
     expect(html).not.toContain('<th>Page</th>');
   });
 
@@ -591,71 +625,132 @@ describe('renderTableOfContents', () => {
       ['test-case-index', 3],
       ['test-1', 4],
     ]);
-    const html = renderTableOfContents(true, true, pageNumbers);
+    const html = renderTableOfContents(true, true, null, pageNumbers);
     expect(html).toContain('<a href="#requirements-matrix">2</a>');
     expect(html).toContain('<a href="#test-case-index">3</a>');
     expect(html).toContain('<a href="#test-1">4</a>');
   });
+
+  it('lists "About" linked to the first feature\'s anchor when one is given', () => {
+    const html = renderTableOfContents(false, false, 'login', undefined);
+    expect(html).toContain('<a href="#about-login">About</a>');
+  });
+
+  it('omits "About" when there is no first feature id', () => {
+    const html = renderTableOfContents(true, true, null, undefined);
+    expect(html).not.toContain('>About<');
+  });
+
+  it('does not return an empty string when only About is present', () => {
+    expect(renderTableOfContents(false, false, 'login', undefined)).not.toBe('');
+  });
 });
 
-// ── compareRequirementIds ────────────────────────────────────────────────────
+// ── compareNaturalIds ────────────────────────────────────────────────────────
 
-describe('compareRequirementIds', () => {
+describe('compareNaturalIds', () => {
   it('sorts numeric suffixes naturally rather than lexicographically', () => {
     const ids = ['FR-CHANNEL-10', 'FR-CHANNEL-2', 'FR-CHANNEL-1'];
-    expect([...ids].sort(compareRequirementIds)).toEqual(['FR-CHANNEL-1', 'FR-CHANNEL-2', 'FR-CHANNEL-10']);
+    expect([...ids].sort(compareNaturalIds)).toEqual(['FR-CHANNEL-1', 'FR-CHANNEL-2', 'FR-CHANNEL-10']);
   });
 
   it('falls back to string comparison when prefixes differ', () => {
-    expect(compareRequirementIds('FR-A-1', 'FR-B-1')).toBeLessThan(0);
+    expect(compareNaturalIds('FR-A-1', 'FR-B-1')).toBeLessThan(0);
   });
 
   it('falls back to string comparison when an id has no numeric suffix', () => {
-    expect(compareRequirementIds('FR-ALPHA', 'FR-BETA')).toBeLessThan(0);
+    expect(compareNaturalIds('FR-ALPHA', 'FR-BETA')).toBeLessThan(0);
   });
 });
 
-// ── computeRequirementStatus ─────────────────────────────────────────────────
+// ── compareTestOrder ─────────────────────────────────────────────────────────
 
-describe('computeRequirementStatus', () => {
+describe('compareTestOrder', () => {
+  it('sorts two id-carrying tests naturally by their test-id', () => {
+    const a: TestRecord = { ...passingTest, testId: 'TC-LOGIN-10' };
+    const b: TestRecord = { ...passingTest, testId: 'TC-LOGIN-2' };
+    expect([a, b].sort(compareTestOrder)).toEqual([b, a]);
+  });
+
+  it('orders a test with a test-id ahead of one without', () => {
+    const withId: TestRecord = { ...passingTest, testId: 'TC-LOGIN-1' };
+    const withoutId: TestRecord = { ...passingTest, testId: null };
+    expect([withoutId, withId].sort(compareTestOrder)).toEqual([withId, withoutId]);
+  });
+
+  it('leaves the relative order of two id-less tests unchanged', () => {
+    const first: TestRecord = { ...passingTest, title: 'Runs first', testId: null };
+    const second: TestRecord = { ...passingTest, title: 'Runs second', testId: null };
+    expect([first, second].sort(compareTestOrder)).toEqual([first, second]);
+  });
+});
+
+// ── computeRollupStatus ──────────────────────────────────────────────────────
+
+describe('computeRollupStatus', () => {
   it('returns missed when no test covers the requirement', () => {
-    expect(computeRequirementStatus([])).toBe('missed');
+    expect(computeRollupStatus([])).toBe('missed');
   });
 
   it('returns pass when every covering test passed', () => {
-    expect(computeRequirementStatus([{ title: 'a', status: 'pass' }])).toBe('pass');
+    expect(computeRollupStatus([{ status: 'pass' }])).toBe('pass');
   });
 
   it('returns fail when any covering test failed', () => {
-    expect(computeRequirementStatus([
-      { title: 'a', status: 'pass' },
-      { title: 'b', status: 'fail' },
+    expect(computeRollupStatus([
+      { status: 'pass' },
+      { status: 'fail' },
     ])).toBe('fail');
   });
 
   it('returns skipped when every covering test was skipped', () => {
-    expect(computeRequirementStatus([{ title: 'a', status: 'skipped' }])).toBe('skipped');
+    expect(computeRollupStatus([{ status: 'skipped' }])).toBe('skipped');
   });
 
   it('prioritizes fail over an otherwise-skipped set', () => {
-    expect(computeRequirementStatus([
-      { title: 'a', status: 'skipped' },
-      { title: 'b', status: 'fail' },
+    expect(computeRollupStatus([
+      { status: 'skipped' },
+      { status: 'fail' },
     ])).toBe('fail');
   });
 
   it('returns flaky when no test failed but at least one needed a retry to pass', () => {
-    expect(computeRequirementStatus([
-      { title: 'a', status: 'pass' },
-      { title: 'b', status: 'flaky' },
+    expect(computeRollupStatus([
+      { status: 'pass' },
+      { status: 'flaky' },
     ])).toBe('flaky');
   });
 
   it('prioritizes fail over a flaky covering test', () => {
-    expect(computeRequirementStatus([
-      { title: 'a', status: 'flaky' },
-      { title: 'b', status: 'fail' },
+    expect(computeRollupStatus([
+      { status: 'flaky' },
+      { status: 'fail' },
     ])).toBe('fail');
+  });
+});
+
+// ── normalizeRequirementInput ────────────────────────────────────────────────
+
+describe('normalizeRequirementInput', () => {
+  it('treats a bare string as a description with no features', () => {
+    expect(normalizeRequirementInput('Users can log in')).toEqual({
+      description: 'Users can log in',
+      features: [],
+    });
+  });
+
+  it('reads description and features from an object entry', () => {
+    expect(normalizeRequirementInput({ description: 'Users can log in', features: ['login'] })).toEqual({
+      description: 'Users can log in',
+      features: ['login'],
+    });
+  });
+
+  it('defaults features to an empty array when an object entry omits it', () => {
+    expect(normalizeRequirementInput({ description: 'Users can log in' })).toEqual({
+      description: 'Users can log in',
+      features: [],
+    });
   });
 });
 
@@ -663,11 +758,11 @@ describe('computeRequirementStatus', () => {
 
 describe('renderTraceabilityMatrix', () => {
   it('returns an empty string when there are no requirements', () => {
-    expect(renderTraceabilityMatrix([], undefined, undefined)).toBe('');
+    expect(renderTraceabilityMatrix([], undefined, undefined, undefined)).toBe('');
   });
 
   it('lists a requirement from the map with no covering test as missed', () => {
-    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined, undefined);
     expect(html).toContain('Requirements Traceability Matrix');
     expect(html).toContain('FR-LOGIN-1');
     expect(html).toContain('No test covers this requirement');
@@ -675,48 +770,48 @@ describe('renderTraceabilityMatrix', () => {
   });
 
   it('styles the requirement id as an id-tag', () => {
-    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined, undefined);
     expect(html).toContain('class="id-tag"');
     expect(html).toContain('>FR-LOGIN-1</td>');
   });
 
   it('places "Proven by" and the test list in a second real row, sharing the row with the requirement\'s own row rather than a guessed offset', () => {
-    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined, undefined);
     expect(html).toContain('class="detail-label"');
     expect(html).toContain('>Proven by</td>');
   });
 
   it('spans the Result badge across both of a requirement\'s rows', () => {
-    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined, undefined);
     expect(html).toContain('rowspan="2"');
   });
 
   it('wraps each requirement\'s two rows in their own tbody, to keep them together across a page break', () => {
-    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
-    expect(html).toContain('<tbody class="requirement-group">');
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined, undefined);
+    expect(html).toContain('class="requirement-group"');
   });
 
   it('capitalizes the first letter of the requirement description', () => {
-    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'users can log in' }, undefined);
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'users can log in' }, undefined, undefined);
     expect(html).toContain('Users can log in');
   });
 
   it('lists the covering test and rolled-up status for a requirement proven by a test', () => {
     const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([test], { 'FR-LOGIN-1': 'Users can log in with valid credentials' }, undefined);
+    const html = renderTraceabilityMatrix([test], { 'FR-LOGIN-1': 'Users can log in with valid credentials' }, undefined, undefined);
     expect(html).toContain('User can log in');
     expect(html).toContain('PASS');
   });
 
   it('capitalizes the first letter of a covering test\'s title', () => {
     const test: TestRecord = { ...passingTest, title: 'user can log in', requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([test], undefined, undefined);
+    const html = renderTraceabilityMatrix([test], undefined, undefined, undefined);
     expect(html).toContain('User can log in');
   });
 
   it('includes a requirement referenced only by a test tag and missing from the map', () => {
     const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([test], undefined, undefined);
+    const html = renderTraceabilityMatrix([test], undefined, undefined, undefined);
     expect(html).toContain('FR-LOGIN-1');
   });
 
@@ -724,12 +819,12 @@ describe('renderTraceabilityMatrix', () => {
     const html = renderTraceabilityMatrix([], {
       'FR-CHANNEL-10': 'Tenth',
       'FR-CHANNEL-2': 'Second',
-    }, undefined);
+    }, undefined, undefined);
     expect(html.indexOf('FR-CHANNEL-2')).toBeLessThan(html.indexOf('FR-CHANNEL-10'));
   });
 
   it('escapes special characters in the requirement id and description', () => {
-    const html = renderTraceabilityMatrix([], { '<b>FR-1</b>': '<script>alert(1)</script>' }, undefined);
+    const html = renderTraceabilityMatrix([], { '<b>FR-1</b>': '<script>alert(1)</script>' }, undefined, undefined);
     expect(html).toContain('&lt;b&gt;FR-1&lt;/b&gt;');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).not.toContain('<script>alert');
@@ -737,7 +832,7 @@ describe('renderTraceabilityMatrix', () => {
 
   it('escapes special characters in a covering test title', () => {
     const test: TestRecord = { ...passingTest, title: '<script>alert(1)</script>', requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([test], undefined, undefined);
+    const html = renderTraceabilityMatrix([test], undefined, undefined, undefined);
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).not.toContain('<script>alert');
   });
@@ -745,7 +840,7 @@ describe('renderTraceabilityMatrix', () => {
   it('rolls up FAIL when one of two covering tests fails', () => {
     const passing: TestRecord = { ...passingTest, requirements: [requirementLogin] };
     const failing: TestRecord = { ...failingTest, requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([passing, failing], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    const html = renderTraceabilityMatrix([passing, failing], { 'FR-LOGIN-1': 'Users can log in' }, undefined, undefined);
     expect(html).toContain('>FAIL<');
     expect(html).toContain('User can log in');
     expect(html).toContain('Form submits data');
@@ -754,27 +849,27 @@ describe('renderTraceabilityMatrix', () => {
   it('colors each covering test\'s (PASS)/(FAIL) to match its actual status', () => {
     const passing: TestRecord = { ...passingTest, requirements: [requirementLogin] };
     const failing: TestRecord = { ...failingTest, requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([passing, failing], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    const html = renderTraceabilityMatrix([passing, failing], { 'FR-LOGIN-1': 'Users can log in' }, undefined, undefined);
     expect(html).toContain('<span class="badge-pass">(PASS)</span>');
     expect(html).toContain('<span class="badge-fail">(FAIL)</span>');
   });
 
   it('shows the covering test\'s test-id, styled as an id-tag, ahead of its title', () => {
     const test: TestRecord = { ...passingTest, testId: 'TC-LOGIN-1', requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([test], undefined, undefined);
+    const html = renderTraceabilityMatrix([test], undefined, undefined, undefined);
     expect(html).toContain('<span class="id-tag">TC-LOGIN-1</span>');
     expect(html.indexOf('TC-LOGIN-1')).toBeLessThan(html.indexOf('User can log in'));
   });
 
   it('shows no page reference in html mode', () => {
     const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([test], undefined, undefined);
+    const html = renderTraceabilityMatrix([test], undefined, undefined, undefined);
     expect(html).not.toContain('p. ');
   });
 
   it('links a resolved page reference to the covering test\'s section', () => {
     const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([test], undefined, new Map([['test-1', 5]]));
+    const html = renderTraceabilityMatrix([test], undefined, undefined, new Map([['test-1', 5]]));
     expect(html).toContain('p. <a href="#test-1">5</a>');
   });
 
@@ -785,8 +880,8 @@ describe('renderTraceabilityMatrix', () => {
     const shortTest: TestRecord = { ...passingTest, requirements: [requirementLogin], steps: [setupStep] };
     const longTest: TestRecord = { ...passingTest, requirements: [requirementLogin], steps: Array(95).fill(setupStep) };
 
-    const shortHtml = renderTraceabilityMatrix([shortTest], { 'FR-LOGIN-1': 'Users can log in' }, 'reserve');
-    const longHtml = renderTraceabilityMatrix([longTest], { 'FR-LOGIN-1': 'Users can log in' }, 'reserve');
+    const shortHtml = renderTraceabilityMatrix([shortTest], { 'FR-LOGIN-1': 'Users can log in' }, undefined, 'reserve');
+    const longHtml = renderTraceabilityMatrix([longTest], { 'FR-LOGIN-1': 'Users can log in' }, undefined, 'reserve');
 
     const shortWidth = Number(shortHtml.match(/min-width:(\d+)ch/)![1]);
     const longWidth = Number(longHtml.match(/min-width:(\d+)ch/)![1]);
@@ -795,13 +890,245 @@ describe('renderTraceabilityMatrix', () => {
   });
 
   it('id anchors the section for the Table of Contents to link to', () => {
-    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined, undefined);
     expect(html).toContain('id="requirements-matrix"');
   });
 
+  it('id anchors each requirement row, so an About feature can link back to it', () => {
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined, undefined);
+    expect(html).toContain('id="requirement-FR-LOGIN-1"');
+  });
+
   it('embeds an invisible page marker in reserve mode', () => {
-    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, 'reserve');
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined, 'reserve');
     expect(html).toContain('[[page:requirements-matrix]]');
+  });
+
+  describe('feature cross-reference', () => {
+    const aboutLogin: Record<string, AboutFeature> = {
+      login: { title: 'Logging in', body: 'Users can sign in.' },
+    };
+
+    it('links a requirement\'s feature to its About entry when about is provided', () => {
+      const html = renderTraceabilityMatrix(
+        [],
+        { 'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] } },
+        aboutLogin,
+        undefined,
+      );
+      expect(html).toContain('<a href="#about-login">Logging in</a>');
+    });
+
+    it('renders no feature reference when about is not provided', () => {
+      const html = renderTraceabilityMatrix(
+        [],
+        { 'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] } },
+        undefined,
+        undefined,
+      );
+      expect(html).not.toContain('href="#about-login"');
+    });
+
+    it('skips a feature ID with no matching about entry, rather than rendering a broken link', () => {
+      const html = renderTraceabilityMatrix(
+        [],
+        { 'FR-LOGIN-1': { description: 'Users can log in', features: ['not-a-real-feature'] } },
+        aboutLogin,
+        undefined,
+      );
+      expect(html).not.toContain('href="#about-not-a-real-feature"');
+    });
+
+    it('renders no feature reference when the requirement declares no features', () => {
+      const html = renderTraceabilityMatrix(
+        [],
+        { 'FR-LOGIN-1': 'Users can log in' },
+        aboutLogin,
+        undefined,
+      );
+      expect(html).not.toContain('href="#about-');
+    });
+
+    it('keeps the feature reference inline with the description, not a separate labeled block', () => {
+      const html = renderTraceabilityMatrix(
+        [],
+        { 'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] } },
+        aboutLogin,
+        undefined,
+      );
+      expect(html).not.toContain('>Feature<');
+      expect(html).toContain('Users can log in <span style="color:#888;font-size:11px;">');
+    });
+
+    it('joins multiple features with a comma', () => {
+      const about: Record<string, AboutFeature> = {
+        login: { title: 'Logging in', body: '...' },
+        logout: { title: 'Logging out', body: '...' },
+      };
+      const html = renderTraceabilityMatrix(
+        [],
+        { 'FR-LOGIN-1': { description: 'Users can log in and out', features: ['login', 'logout'] } },
+        about,
+        undefined,
+      );
+      expect(html).toContain('<a href="#about-login">Logging in</a>, <a href="#about-logout">Logging out</a>');
+    });
+
+    it('links a resolved page reference for the feature', () => {
+      const html = renderTraceabilityMatrix(
+        [],
+        { 'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] } },
+        aboutLogin,
+        new Map([['about-login', 3]]),
+      );
+      expect(html).toContain('p. <a href="#about-login">3</a>');
+    });
+  });
+});
+
+// ── renderAboutSection ───────────────────────────────────────────────────────
+
+describe('renderAboutSection', () => {
+  it('returns an empty string when about is undefined', () => {
+    expect(renderAboutSection(undefined, undefined, [], undefined)).toBe('');
+  });
+
+  it('returns an empty string when about is empty', () => {
+    expect(renderAboutSection({}, undefined, [], undefined)).toBe('');
+  });
+
+  it('renders the feature title as an h2', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: 'Some prose.' } };
+    const html = renderAboutSection(about, undefined, [], undefined);
+    expect(html).toContain('<h2>Logging in</h2>');
+  });
+
+  it('anchors each feature by ID, in the order given', () => {
+    const about: Record<string, AboutFeature> = {
+      login: { title: 'Logging in', body: '...' },
+      logout: { title: 'Logging out', body: '...' },
+    };
+    const html = renderAboutSection(about, undefined, [], undefined);
+    expect(html).toContain('id="about-login"');
+    expect(html.indexOf('id="about-login"')).toBeLessThan(html.indexOf('id="about-logout"'));
+  });
+
+  it('renders Markdown bold as <strong>', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: 'Enter your **password**.' } };
+    const html = renderAboutSection(about, undefined, [], undefined);
+    expect(html).toContain('<strong>password</strong>');
+  });
+
+  it('renders each blank-line-separated paragraph as its own <p>', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: 'First paragraph.\n\nSecond paragraph.' } };
+    const html = renderAboutSection(about, undefined, [], undefined);
+    expect(html).toContain('<p>First paragraph.</p>');
+    expect(html).toContain('<p>Second paragraph.</p>');
+  });
+
+  it('escapes raw HTML embedded in the body instead of passing it through', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: 'Text with <script>alert(1)</script> in it.' } };
+    const html = renderAboutSection(about, undefined, [], undefined);
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+  });
+
+  it('rolls up MISSED when no test covers any requirement under the feature', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: '...' } };
+    const html = renderAboutSection(about, undefined, [], undefined);
+    expect(html).toContain('>MISSED<');
+  });
+
+  it('rolls up the feature status from tests whose matched requirements list that feature', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: '...' } };
+    const test: TestRecord = {
+      ...passingTest,
+      requirements: [{ id: 'FR-LOGIN-1', description: 'Users can log in', features: ['login'] }],
+    };
+    const html = renderAboutSection(about, undefined, [test], undefined);
+    expect(html).toContain('>PASS<');
+  });
+
+  it('rolls up FAIL when any covering test fails, even if others pass', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: '...' } };
+    const passing: TestRecord = {
+      ...passingTest,
+      requirements: [{ id: 'FR-LOGIN-1', description: 'Users can log in', features: ['login'] }],
+    };
+    const failing: TestRecord = {
+      ...failingTest,
+      requirements: [{ id: 'FR-LOGIN-2', description: 'Users can log out', features: ['login'] }],
+    };
+    const html = renderAboutSection(about, undefined, [passing, failing], undefined);
+    expect(html).toContain('>FAIL<');
+  });
+
+  it('ignores a test whose requirements don\'t list this feature', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: '...' } };
+    const unrelated: TestRecord = {
+      ...failingTest,
+      requirements: [{ id: 'FR-OTHER-1', description: 'Something else', features: ['other'] }],
+    };
+    const html = renderAboutSection(about, undefined, [unrelated], undefined);
+    expect(html).toContain('>MISSED<');
+  });
+
+  it('embeds an invisible page marker in reserve mode', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: '...' } };
+    const html = renderAboutSection(about, undefined, [], 'reserve');
+    expect(html).toContain('[[page:about-login]]');
+  });
+
+  it('wraps every feature in one shared section, not one section per feature', () => {
+    const about: Record<string, AboutFeature> = {
+      login: { title: 'Logging in', body: '...' },
+      logout: { title: 'Logging out', body: '...' },
+    };
+    const html = renderAboutSection(about, undefined, [], undefined);
+    expect((html.match(/class="section"/g) ?? []).length).toBe(1);
+  });
+
+  it('forces a fresh page after the whole About section, so the Traceability Matrix doesn\'t share its last page', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: '...' } };
+    const html = renderAboutSection(about, undefined, [], undefined);
+    expect(html).toContain('page-break-after:always');
+  });
+
+  describe('requirements cross-reference', () => {
+    const aboutLogin: Record<string, AboutFeature> = { login: { title: 'Logging in', body: '...' } };
+
+    it('lists the requirements that point to this feature, linked to their Matrix row', () => {
+      const requirementsMap = { 'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] } };
+      const html = renderAboutSection(aboutLogin, requirementsMap, [], undefined);
+      expect(html).toContain('<a href="#requirement-FR-LOGIN-1">FR-LOGIN-1</a>');
+      expect(html).toContain('Users can log in');
+    });
+
+    it('sorts listed requirements naturally by id', () => {
+      const requirementsMap = {
+        'FR-LOGIN-10': { description: 'Tenth', features: ['login'] },
+        'FR-LOGIN-2': { description: 'Second', features: ['login'] },
+      };
+      const html = renderAboutSection(aboutLogin, requirementsMap, [], undefined);
+      expect(html.indexOf('FR-LOGIN-2')).toBeLessThan(html.indexOf('FR-LOGIN-10'));
+    });
+
+    it('excludes a requirement that doesn\'t declare this feature', () => {
+      const requirementsMap = { 'FR-OTHER-1': { description: 'Something else', features: ['other'] } };
+      const html = renderAboutSection(aboutLogin, requirementsMap, [], undefined);
+      expect(html).not.toContain('FR-OTHER-1');
+    });
+
+    it('shows a placeholder when no requirement points to this feature', () => {
+      const html = renderAboutSection(aboutLogin, undefined, [], undefined);
+      expect(html).toContain('No requirements are tied to this feature yet.');
+    });
+
+    it('links a resolved page reference for each listed requirement', () => {
+      const requirementsMap = { 'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] } };
+      const html = renderAboutSection(aboutLogin, requirementsMap, [], new Map([['requirement-FR-LOGIN-1', 4]]));
+      expect(html).toContain('p. <a href="#requirement-FR-LOGIN-1">4</a>');
+    });
   });
 });
 
@@ -902,11 +1229,86 @@ describe('renderReport', () => {
       ['test-1', 5],
     ]);
     const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
-    const html = renderReport('R', [test], new Date(), { 'FR-LOGIN-1': 'Users can log in' }, pageNumbers);
+    const html = renderReport('R', [test], new Date(), { 'FR-LOGIN-1': 'Users can log in' }, undefined, undefined, pageNumbers);
     expect(html).toContain('<th>Page</th>');
     expect(html).not.toContain('[[page:');
     // Table of Contents' "Test Results" row links to the first test's resolved page.
     expect(html).toContain('<a href="#test-1">Test Results</a>');
     expect(html).toContain('<a href="#test-1">5</a>');
+  });
+
+  it('orders both the Test Case Index and the test sections by test-id, so a row and its page always match', () => {
+    const testC: TestRecord = { ...passingTest, title: 'Runs third', testId: 'TC-LOGIN-10' };
+    const testA: TestRecord = { ...passingTest, title: 'Runs first', testId: 'TC-LOGIN-1' };
+    const testB: TestRecord = { ...passingTest, title: 'Runs second', testId: 'TC-LOGIN-2' };
+    const html = renderReport('R', [testC, testA, testB], new Date());
+
+    // Test Case Index rows read top-to-bottom in id order.
+    const indexSection = html.slice(html.indexOf('Test Case Index'), html.indexOf('id="test-1"'));
+    expect(indexSection.indexOf('TC-LOGIN-1')).toBeLessThan(indexSection.indexOf('TC-LOGIN-2'));
+    expect(indexSection.indexOf('TC-LOGIN-2')).toBeLessThan(indexSection.indexOf('TC-LOGIN-10'));
+
+    // The physical sections (their <h2> headings) follow the same order, not
+    // the original array order — checked via <h2> since the index also
+    // mentions each title, just not wrapped in a heading tag.
+    expect(html.indexOf('<h2>Runs first</h2>')).toBeLessThan(html.indexOf('<h2>Runs second</h2>'));
+    expect(html.indexOf('<h2>Runs second</h2>')).toBeLessThan(html.indexOf('<h2>Runs third</h2>'));
+
+    // Each index row's link lands on the section that actually carries its id.
+    expect(html).toContain('<td class="id-tag">TC-LOGIN-1</td>\n        <td><a href="#test-1">Runs first</a>');
+  });
+
+  it('appends tests with no test-id after all id-carrying tests, in their original relative order', () => {
+    const withId: TestRecord = { ...passingTest, title: 'Has an id', testId: 'TC-LOGIN-1' };
+    const noIdFirst: TestRecord = { ...passingTest, title: 'No id, ran first', testId: null };
+    const noIdSecond: TestRecord = { ...passingTest, title: 'No id, ran second', testId: null };
+    const html = renderReport('R', [noIdFirst, noIdSecond, withId], new Date());
+
+    expect(html.indexOf('Has an id')).toBeLessThan(html.indexOf('No id, ran first'));
+    expect(html.indexOf('No id, ran first')).toBeLessThan(html.indexOf('No id, ran second'));
+  });
+
+  describe('about', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: 'Some prose.' } };
+
+    it('renders the About section after the Table of Contents, which always follows the cover directly', () => {
+      const html = renderReport('R', [], new Date(), undefined, about);
+      expect(html.indexOf('<h1>R</h1>')).toBeLessThan(html.indexOf('<h2>Table of Contents</h2>'));
+      expect(html.indexOf('<h2>Table of Contents</h2>')).toBeLessThan(html.indexOf('<h2>Logging in</h2>'));
+    });
+
+    it('lists About in the Table of Contents, linked to the first feature, only when about is provided', () => {
+      const withAbout = renderReport('R', [], new Date(), undefined, about);
+      const withoutAbout = renderReport('R', [], new Date());
+      expect(withAbout).toContain('<a href="#about-login">About</a>');
+      expect(withoutAbout).not.toContain('>About<');
+    });
+
+    it('renders no About section when about is omitted — existing reports are unaffected', () => {
+      const html = renderReport('R', [passingTest], new Date(), { 'FR-LOGIN-1': 'Users can log in' });
+      expect(html).not.toContain('<h2>Logging in</h2>');
+      expect(html).not.toContain('id="about-');
+    });
+  });
+
+  describe('overview', () => {
+    it('renders the overview on the cover, between the run date and the pass/fail summary', () => {
+      const html = renderReport('R', [], new Date(), undefined, undefined, 'Some **overview** prose.');
+      expect(html).toContain('<div class="overview">');
+      expect(html).toContain('<p>Some <strong>overview</strong> prose.</p>');
+      expect(html.indexOf('class="meta"')).toBeLessThan(html.indexOf('class="overview"'));
+      expect(html.indexOf('class="overview"')).toBeLessThan(html.indexOf('class="summary-box'));
+    });
+
+    it('renders no overview block when omitted — existing reports are unaffected', () => {
+      const html = renderReport('R', [], new Date());
+      expect(html).not.toContain('class="overview"');
+    });
+
+    it('escapes raw HTML embedded in the overview instead of passing it through', () => {
+      const html = renderReport('R', [], new Date(), undefined, undefined, 'Text with <script>alert(1)</script> in it.');
+      expect(html).not.toContain('<script>alert(1)</script>');
+      expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    });
   });
 });

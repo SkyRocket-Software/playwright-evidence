@@ -5,11 +5,19 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// The reporter's `requirements` option is a plain Record<string, string> —
-// build it however you like. This demo reads it from JSON; README.md shows
-// the same pattern for CSV/YAML/etc.
-const requirements: Record<string, string> = JSON.parse(
-  fs.readFileSync(path.join(__dirname, 'e2e/requirements.json'), 'utf8'),
+interface Content {
+  title: string;
+  overview: string;
+  about: Record<string, { title: string; body: string }>;
+  requirements: Record<string, string | { description: string; features?: string[] }>;
+}
+
+// A single content file drives the report's title, overview, about features,
+// and requirements — this package has no opinion on where any of this comes
+// from, or whether it's one file or several; README.md shows the same
+// "bring your own parsed data" pattern for CSV/YAML/etc.
+const content: Content = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'e2e/content.json'), 'utf8'),
 );
 
 export default defineConfig({
@@ -30,11 +38,14 @@ export default defineConfig({
       {
         output: 'pdf',
         file: 'e2e-output/evidence-report.pdf',
-        title: 'Skyrocket POC Evidence',
-        // FR-PRICING-1 (see e2e/requirements.json) is deliberately untagged
-        // by any test — demonstrates the traceability matrix surfacing a
-        // MISSED requirement, not just covered ones.
-        requirements,
+        title: content.title,
+        overview: content.overview,
+        // FR-PRICING-1 (see e2e/content.json) is deliberately untagged by any
+        // test — demonstrates the traceability matrix surfacing a MISSED
+        // requirement, and — since it's the only requirement under the
+        // "pricing" feature — an About section also showing MISSED.
+        requirements: content.requirements,
+        about: content.about,
       },
     ],
   ],

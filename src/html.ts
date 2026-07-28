@@ -2,6 +2,8 @@
  * Shared HTML primitives and report-rendering functions for evidence reports.
  */
 
+import { Marked } from 'marked';
+
 export interface StepRecord {
   title: string;
   status: 'pass' | 'fail';
@@ -15,6 +17,24 @@ export interface StepRecord {
 export interface RequirementRecord {
   id: string;
   description: string;
+  /** Feature IDs (keys into the `about` map) this requirement supports. Empty when the requirement declares none. */
+  features: string[];
+}
+
+/**
+ * A `requirements` map entry's object form — a plain string is still accepted
+ * as shorthand for `{ description }` with no features (see `normalizeRequirementInput`).
+ */
+export interface RequirementInput {
+  description: string;
+  /** Feature IDs (keys into the `about` map) this requirement supports. */
+  features?: string[];
+}
+
+export interface AboutFeature {
+  title: string;
+  /** Markdown prose, rendered via `marked`. Raw HTML in the source is escaped, not passed through. */
+  body: string;
 }
 
 export interface TestRecord {
@@ -26,6 +46,8 @@ export interface TestRecord {
   requirements: RequirementRecord[];
   /** Stable identifier from a `type: 'test-id'` annotation, or null if the test has none. */
   testId: string | null;
+  /** Enclosing `test.describe(...)` title chain, joined with ' › ', or null if the test has no enclosing describe block. */
+  describeTitle: string | null;
 }
 
 /**
@@ -68,6 +90,28 @@ function capitalizeFirst(str: string): string {
   return str.length === 0 ? str : str.charAt(0).toUpperCase() + str.slice(1);
 }
 
+// An isolated Marked instance with its raw-HTML renderer overridden, rather
+// than mutating the shared default instance via marked.use() — this module
+// has no business changing global markdown-parsing behavior for anything
+// else that might import 'marked' in the same process.
+const markdownRenderer = new Marked({
+  renderer: {
+    html: ({ text }) => escapeHtml(text),
+  },
+});
+
+/**
+ * Renders `about` feature body Markdown to HTML. Raw HTML embedded in the
+ * source (block or inline) is escaped rather than passed through — `about`
+ * content is authored prose from the consumer's own config, the same trust
+ * level as `title`, but PDF mode navigates a real headless Chromium to this
+ * HTML, so a stray `<script>` typed into someone's markdown would otherwise
+ * actually execute during report generation rather than just look wrong.
+ */
+function renderMarkdown(markdown: string): string {
+  return markdownRenderer.parse(markdown, { async: false });
+}
+
 export function badge(text: string, variant: 'pass' | 'fail' | 'skipped' | 'missed' | 'flaky'): string {
   return `<span class="badge badge-${variant}">${text}</span>`;
 }
@@ -106,12 +150,13 @@ function pageMarker(markerId: string, pageNumbers: PageNumbers): string {
  * discovers; it has to over-estimate up front. Counting only tests would
  * undercount a screenshot-heavy suite, where a single test's evidenceSteps can
  * each force their own page — so this counts every step across every test as a
- * potential extra page, plus a fixed buffer for the cover/contents/matrix/index
- * pages ahead of the first test.
+ * potential extra page, every About feature (each gets its own page too),
+ * plus a fixed buffer for the cover/contents/matrix/index pages ahead of the
+ * first test.
  */
-function estimateMaxPageDigits(tests: TestRecord[]): number {
+function estimateMaxPageDigits(tests: TestRecord[], aboutFeatureCount: number): number {
   const totalSteps = tests.reduce((sum, test) => sum + test.steps.length, 0);
-  return String(tests.length + totalSteps + 10).length;
+  return String(tests.length + totalSteps + aboutFeatureCount + 10).length;
 }
 
 const PAGE_REF_PREFIX = '— p. ';
@@ -192,6 +237,19 @@ export function sharedStyles(): string {
       color: #555;
       margin-bottom: 32px;
     }
+    .cover .overview {
+      max-width: 640px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #333;
+      margin-bottom: 24px;
+    }
+    .cover .overview p {
+      margin-bottom: 10px;
+    }
+    .cover .overview p:last-child {
+      margin-bottom: 0;
+    }
     .cover .summary-box {
       display: inline-block;
       border: 2px solid #111;
@@ -222,6 +280,7 @@ export function sharedStyles(): string {
     .section-header {
       display: flex;
       align-items: baseline;
+      justify-content: space-between;
       gap: 14px;
       margin-bottom: 16px;
     }
@@ -245,6 +304,20 @@ export function sharedStyles(): string {
       color: #555;
       font-weight: 600;
       white-space: nowrap;
+    }
+
+    /*
+     * A test's enclosing test.describe(...) title, shown as a kicker line
+     * above its heading — restores the "subject" a leaf test title can lose
+     * on its own (e.g. "shows the hero heading" reads as a fragment; with
+     * this above it, the pairing reads as a complete statement). Plain body
+     * font, not monospace like .id-tag — this is authored prose, not an
+     * identifier — and sized between the id-tag and the heading it sits under.
+     */
+    .describe-label {
+      font-size: 13px;
+      color: #555;
+      margin-bottom: 4px;
     }
 
     /*
@@ -509,14 +582,19 @@ export function renderTest(test: TestRecord, index: number, pageNumbers: PageNum
 
   const requirementsBlock = renderRequirementsList(test.requirements);
 
-  const eyebrow = test.testId
+  const testIdEyebrow = test.testId
     ? `<div class="id-tag" style="margin-bottom:4px;">${escapeHtml(test.testId)}</div>`
+    : '';
+
+  const describeEyebrow = test.describeTitle
+    ? `<div class="describe-label">${escapeHtml(capitalizeFirst(test.describeTitle))}</div>`
     : '';
 
   return `
     <div class="section" id="test-${index}">
       ${pageMarker(`test-${index}`, pageNumbers)}
-      ${eyebrow}
+      ${testIdEyebrow}
+      ${describeEyebrow}
       <div class="section-header">
         <h2>${escapeHtml(capitalizeFirst(test.title))}</h2>
         ${badge(badgeText, badgeVariant)}
@@ -572,20 +650,25 @@ export function renderTestCaseIndex(tests: TestRecord[], pageNumbers: PageNumber
 /**
  * Renders the top-level Table of Contents shown on page 1, right below the
  * cover — linking (and, once resolved, page-numbering) the report's major
- * parts: the Requirements Traceability Matrix, the Test Case Index, and Test
- * Results. There's no standalone "Test Results" section to point to — it's
- * just where the individual test pages begin — so that entry links directly
- * to the first test instead. Returns an empty string when there is nothing
- * to list.
+ * parts: About (if `about` is set), the Requirements Traceability Matrix, the
+ * Test Case Index, and Test Results. Neither About nor Test Results has a
+ * standalone wrapping section to point to — About is just where the first
+ * feature's page begins, and Test Results is just where the first test's
+ * page begins — so both entries link directly to that first anchor instead.
+ * Returns an empty string when there is nothing to list.
  */
 export function renderTableOfContents(
   hasMatrix: boolean,
   hasTests: boolean,
+  firstAboutFeatureId: string | null,
   pageNumbers: PageNumbers,
 ): string {
-  if (!hasMatrix && !hasTests) return '';
+  if (!hasMatrix && !hasTests && !firstAboutFeatureId) return '';
 
   const rows = [
+    firstAboutFeatureId
+      ? `<tr><td><a href="#about-${firstAboutFeatureId}">About</a></td>${pageCell(`about-${firstAboutFeatureId}`, pageNumbers)}</tr>`
+      : '',
     hasMatrix
       ? `<tr><td><a href="#requirements-matrix">Requirements Traceability Matrix</a></td>${pageCell('requirements-matrix', pageNumbers)}</tr>`
       : '',
@@ -610,13 +693,13 @@ export function renderTableOfContents(
 }
 
 /**
- * Natural-sort comparator for requirement IDs sharing a common prefix ending in
- * a number (e.g. 'FR-CHANNEL-2' before 'FR-CHANNEL-10') — plain string
- * comparison would otherwise put 'FR-CHANNEL-10' right after 'FR-CHANNEL-1'.
- * Falls back to a plain string comparison when the prefixes differ or either
- * ID doesn't end in a number.
+ * Natural-sort comparator for IDs (requirement or test) sharing a common
+ * prefix ending in a number (e.g. 'FR-CHANNEL-2' before 'FR-CHANNEL-10') —
+ * plain string comparison would otherwise put 'FR-CHANNEL-10' right after
+ * 'FR-CHANNEL-1'. Falls back to a plain string comparison when the prefixes
+ * differ or either ID doesn't end in a number.
  */
-export function compareRequirementIds(a: string, b: string): number {
+export function compareNaturalIds(a: string, b: string): number {
   const matchA = a.match(/^(.*-)(\d+)$/);
   const matchB = b.match(/^(.*-)(\d+)$/);
   if (matchA && matchB && matchA[1] === matchB[1]) {
@@ -626,19 +709,48 @@ export function compareRequirementIds(a: string, b: string): number {
 }
 
 /**
- * Rolls up a requirement's status from the tests that cover it: 'missed' when
- * no test covers it, 'fail' if any covering test failed, 'skipped' if every
- * covering test was skipped, 'flaky' if none failed but at least one covering
- * test needed a retry to pass, otherwise a clean 'pass'.
+ * Orders tests for display: those with a `test-id` first, sorted naturally by
+ * that id (see `compareNaturalIds`) so the Test Case Index reads top-to-bottom
+ * in id order instead of requiring a scan to find one — then any tests with
+ * no test-id, left in their original relative order (Array.prototype.sort is
+ * stable, so returning 0 for that pair is enough to preserve it).
  */
-export function computeRequirementStatus(
-  coveringTests: Array<{ title: string; status: TestRecord['status'] }>,
+export function compareTestOrder(a: TestRecord, b: TestRecord): number {
+  if (a.testId !== null && b.testId !== null) return compareNaturalIds(a.testId, b.testId);
+  if (a.testId !== null) return -1;
+  if (b.testId !== null) return 1;
+  return 0;
+}
+
+/**
+ * Rolls up a status from a set of covering tests: 'missed' when there are
+ * none, 'fail' if any covering test failed, 'skipped' if every covering test
+ * was skipped, 'flaky' if none failed but at least one needed a retry to
+ * pass, otherwise a clean 'pass'. Used both for a single requirement (tests
+ * that cover it directly) and for a feature (tests covering any requirement
+ * under it) — same shape of computation one level apart, so one function
+ * covers both rather than duplicating the rollup logic twice.
+ */
+export function computeRollupStatus(
+  coveringTests: Array<{ status: TestRecord['status'] }>,
 ): 'pass' | 'fail' | 'skipped' | 'missed' | 'flaky' {
   if (coveringTests.length === 0) return 'missed';
   if (coveringTests.some((test) => test.status === 'fail')) return 'fail';
   if (coveringTests.every((test) => test.status === 'skipped')) return 'skipped';
   if (coveringTests.some((test) => test.status === 'flaky')) return 'flaky';
   return 'pass';
+}
+
+/**
+ * Normalizes a `requirements` map entry to its plain-object shape — a bare
+ * string is shorthand for `{ description }` with no features. Kept in one
+ * place and reused wherever a requirements-map entry is read, so the two
+ * accepted shapes can't drift out of sync between call sites.
+ */
+export function normalizeRequirementInput(entry: string | RequirementInput): { description: string; features: string[] } {
+  return typeof entry === 'string'
+    ? { description: entry, features: [] }
+    : { description: entry.description, features: entry.features ?? [] };
 }
 
 /**
@@ -651,37 +763,40 @@ export function computeRequirementStatus(
  */
 export function renderTraceabilityMatrix(
   tests: TestRecord[],
-  requirementsMap: Record<string, string> | undefined,
+  requirementsMap: Record<string, string | RequirementInput> | undefined,
+  about: Record<string, AboutFeature> | undefined,
   pageNumbers: PageNumbers,
 ): string {
   const map = requirementsMap ?? {};
   const entries = new Map<string, {
     description: string;
+    features: string[];
     tests: Array<{ title: string; status: TestRecord['status']; testId: string | null; markerId: string }>;
   }>();
 
   for (const id of Object.keys(map)) {
-    entries.set(id, { description: map[id], tests: [] });
+    const normalized = normalizeRequirementInput(map[id]);
+    entries.set(id, { description: normalized.description, features: normalized.features, tests: [] });
   }
 
   tests.forEach((test, i) => {
     const markerId = `test-${i + 1}`;
     for (const requirement of test.requirements) {
       if (!entries.has(requirement.id)) {
-        entries.set(requirement.id, { description: requirement.description, tests: [] });
+        entries.set(requirement.id, { description: requirement.description, features: requirement.features, tests: [] });
       }
       entries.get(requirement.id)!.tests.push({ title: test.title, status: test.status, testId: test.testId, markerId });
     }
   });
 
-  const ids = Array.from(entries.keys()).sort(compareRequirementIds);
+  const ids = Array.from(entries.keys()).sort(compareNaturalIds);
   if (ids.length === 0) return '';
 
-  const maxDigits = estimateMaxPageDigits(tests);
+  const maxDigits = estimateMaxPageDigits(tests, Object.keys(about ?? {}).length);
 
   const rows = ids.map((id) => {
     const entry = entries.get(id)!;
-    const status = computeRequirementStatus(entry.tests);
+    const status = computeRollupStatus(entry.tests);
     const testList = entry.tests.length
       ? entry.tests.map((test) => {
           const title = escapeHtml(capitalizeFirst(test.title));
@@ -696,6 +811,23 @@ export function renderTraceabilityMatrix(
         }).join('<br/>')
       : '<span style="color:#a01010;">No test covers this requirement</span>';
 
+    // Only reference a feature that actually has an `about` entry — a
+    // feature ID with nothing to look up (about missing, or that ID absent
+    // from it) has no title and no valid link target, so it's silently
+    // skipped rather than rendering a broken reference. Folded inline into
+    // the same .detail-value as the description (not a separate labeled
+    // block below it) so a requirement with features stays exactly as
+    // compact as one without.
+    const featureLinks = about
+      ? entry.features
+          .filter((featureId) => about[featureId])
+          .map((featureId) => `<a href="#about-${featureId}">${escapeHtml(about[featureId].title)}</a>${pageReference(`about-${featureId}`, pageNumbers, maxDigits)}`)
+          .join(', ')
+      : '';
+    const featureSuffix = featureLinks
+      ? ` <span style="color:#888;font-size:11px;">— ${featureLinks}</span>`
+      : '';
+
     // Two real <tr>s, not one row with stacked divs — "Proven by" and the
     // test list need to share an actual row with the description's own row
     // so their vertical position is governed by the table itself, not a
@@ -705,11 +837,11 @@ export function renderTraceabilityMatrix(
     // on row 1, padding-top on row 2) — otherwise the gap between the
     // description and "Proven by" doubles up and reads as too much space.
     return `
-      <tbody class="requirement-group">
+      <tbody class="requirement-group" id="requirement-${id}">
         <tr>
-          <td class="id-tag" style="border-bottom:none;padding-bottom:2px;">${escapeHtml(id)}</td>
+          <td class="id-tag" style="border-bottom:none;padding-bottom:2px;">${pageMarker(`requirement-${id}`, pageNumbers)}${escapeHtml(id)}</td>
           <td style="border-bottom:none;padding-bottom:2px;">
-            <div class="detail-value">${escapeHtml(capitalizeFirst(entry.description))}</div>
+            <div class="detail-value">${escapeHtml(capitalizeFirst(entry.description))}${featureSuffix}</div>
           </td>
           <td class="col-status" rowspan="2">${badge(status.toUpperCase(), status)}</td>
         </tr>
@@ -734,6 +866,85 @@ export function renderTraceabilityMatrix(
 }
 
 /**
+ * Renders the About section: one entry per `about` feature (in the order the
+ * consumer authored the map — not re-sorted, since that ordering is
+ * deliberate prose, unlike requirement/test IDs), each with a rolled-up
+ * status badge computed from every test whose matched requirements list that
+ * feature — the same rollup used for a single requirement, one level up
+ * (feature -> requirements -> tests instead of requirement -> tests). A
+ * feature with no requirements pointing to it (or none of those requirements
+ * covered yet) naturally produces an empty covering-tests list, which rolls
+ * up to 'missed' — the same status an uncovered requirement already gets.
+ *
+ * Each feature also lists the requirements that point to it (naturally
+ * sorted, each linked to its row in the Traceability Matrix), which is the
+ * other half of the cross-reference — a Matrix row already links out to its
+ * feature(s), so without this a reader could jump from requirement to
+ * feature but not back, making a feature's own requirements something you
+ * could only find by scanning the whole Matrix for matches.
+ *
+ * All features share one section (like the Traceability Matrix's rows share
+ * one section) rather than each forcing its own page — feature bodies are
+ * usually short prose, and giving each a full page the way a test does would
+ * leave far more blank space than it's worth. `.section-header`'s existing
+ * page-break-after:avoid keeps a feature's heading from being orphaned away
+ * from its own body, without forcing a break between one feature and the
+ * next. There's no separate "About" heading: the Table of Contents links
+ * straight to the first feature's anchor, the same way it links to the first
+ * test instead of a standalone "Test Results" section. Returns an empty
+ * string when `about` is undefined or empty.
+ */
+export function renderAboutSection(
+  about: Record<string, AboutFeature> | undefined,
+  requirementsMap: Record<string, string | RequirementInput> | undefined,
+  tests: TestRecord[],
+  pageNumbers: PageNumbers,
+): string {
+  if (!about) return '';
+  const featureIds = Object.keys(about);
+  if (featureIds.length === 0) return '';
+
+  const map = requirementsMap ?? {};
+  const maxDigits = estimateMaxPageDigits(tests, featureIds.length);
+
+  const features = featureIds.map((featureId) => {
+    const feature = about[featureId];
+    const coveringTests = tests.filter((test) =>
+      test.requirements.some((requirement) => requirement.features.includes(featureId)),
+    );
+    const status = computeRollupStatus(coveringTests);
+
+    const matchingRequirementIds = Object.keys(map)
+      .filter((id) => normalizeRequirementInput(map[id]).features.includes(featureId))
+      .sort(compareNaturalIds);
+
+    const requirementsList = matchingRequirementIds.length
+      ? `<ul style="margin:0 0 16px 20px;font-size:13px;">${matchingRequirementIds.map((id) => {
+          const description = escapeHtml(capitalizeFirst(normalizeRequirementInput(map[id]).description));
+          return `<li><span class="id-tag"><a href="#requirement-${id}">${escapeHtml(id)}</a></span> — ${description}${pageReference(`requirement-${id}`, pageNumbers, maxDigits)}</li>`;
+        }).join('')}</ul>`
+      : '<p style="color:#a01010;font-size:13px;margin:0 0 16px;">No requirements are tied to this feature yet.</p>';
+
+    return `
+      <div id="about-${featureId}" style="margin-bottom:32px;">
+        ${pageMarker(`about-${featureId}`, pageNumbers)}
+        <div class="section-header">
+          <h2>${escapeHtml(feature.title)}</h2>
+          ${badge(status.toUpperCase(), status)}
+        </div>
+        ${renderMarkdown(feature.body)}
+        <div class="detail-label">Requirements</div>
+        ${requirementsList}
+      </div>`;
+  }).join('\n');
+
+  return `
+    <div class="section" id="about" style="page-break-after:always;">
+      ${features}
+    </div>`;
+}
+
+/**
  * Renders the full evidence report as a self-contained HTML string.
  *
  * @param title            - Report title (shown in cover and <title>)
@@ -742,6 +953,12 @@ export function renderTraceabilityMatrix(
  * @param requirementsMap  - Optional requirement ID -> description map. When
  *                           set, a Requirements Traceability Matrix section is
  *                           rendered after the Table of Contents.
+ * @param about            - Optional feature ID -> title/body map. When set,
+ *                           an About section is rendered between the cover and
+ *                           the Table of Contents, one entry per feature.
+ * @param overview         - Optional Markdown description of the application
+ *                           as a whole, rendered on the cover page itself,
+ *                           between the run date and the pass/fail summary.
  * @param pageNumbers      - See `PageNumbers`. Omit for HTML mode (no page
  *                           numbers); `'reserve'` for print pass 1;
  *                           the resolved marker -> page map for print pass 2.
@@ -750,29 +967,41 @@ export function renderReport(
   title: string,
   tests: TestRecord[],
   startTime: Date,
-  requirementsMap?: Record<string, string>,
+  requirementsMap?: Record<string, string | RequirementInput>,
+  about?: Record<string, AboutFeature>,
+  overview?: string,
   pageNumbers?: PageNumbers,
 ): string {
-  const passed = tests.filter((t) => t.status === 'pass' || t.status === 'flaky').length;
-  const failed = tests.filter((t) => t.status === 'fail').length;
-  const total = tests.length;
+  // Sorted once and used for everything below (matrix, index, sections) so a
+  // test's Test Case Index row and its actual section land at the same
+  // position — id-sorted tests read top-to-bottom by id in both places,
+  // rather than the index being reordered while pages stay in run order.
+  const orderedTests = [...tests].sort(compareTestOrder);
+
+  const passed = orderedTests.filter((t) => t.status === 'pass' || t.status === 'flaky').length;
+  const failed = orderedTests.filter((t) => t.status === 'fail').length;
+  const total = orderedTests.length;
   // A flaky test did pass, but only after a retry — that's not the same
   // guarantee as a clean run, so it isn't allowed to read as an unqualified
   // PASS overall. FAIL still takes priority over flaky.
   const overallStatus: 'PASS' | 'FAIL' | 'FLAKY' =
-    failed > 0 ? 'FAIL' : tests.some((t) => t.status === 'flaky') ? 'FLAKY' : 'PASS';
+    failed > 0 ? 'FAIL' : orderedTests.some((t) => t.status === 'flaky') ? 'FLAKY' : 'PASS';
 
-  const matrix = renderTraceabilityMatrix(tests, requirementsMap, pageNumbers);
-  const index = renderTestCaseIndex(tests, pageNumbers);
-  const tableOfContents = renderTableOfContents(matrix !== '', tests.length > 0, pageNumbers);
-  const testSections = tests
+  const aboutSection = renderAboutSection(about, requirementsMap, orderedTests, pageNumbers);
+  const firstAboutFeatureId = about ? (Object.keys(about)[0] ?? null) : null;
+  const matrix = renderTraceabilityMatrix(orderedTests, requirementsMap, about, pageNumbers);
+  const index = renderTestCaseIndex(orderedTests, pageNumbers);
+  const tableOfContents = renderTableOfContents(matrix !== '', orderedTests.length > 0, firstAboutFeatureId, pageNumbers);
+  const testSections = orderedTests
     .map((t, i) => renderTest(t, i + 1, pageNumbers))
     .join('\n');
+  const overviewBlock = overview ? `<div class="overview">${renderMarkdown(overview)}</div>` : '';
 
   return htmlDocument(title, `
   <div class="cover">
     <h1>${escapeHtml(title)}</h1>
     <p class="meta">Generated: ${runDate(startTime)}</p>
+    ${overviewBlock}
     <div class="summary-box overall-${overallStatus.toLowerCase()}">
       <div class="overall ${overallStatus === 'PASS' ? 'pass-text' : overallStatus === 'FLAKY' ? 'flaky-text' : 'fail-text'}">${overallStatus}</div>
       <div>${passed} of ${total} test${total !== 1 ? 's' : ''} passed</div>
@@ -780,6 +1009,7 @@ export function renderReport(
   </div>
   <div class="body">
     ${tableOfContents}
+    ${aboutSection}
     ${matrix}
     ${index}
     ${testSections}

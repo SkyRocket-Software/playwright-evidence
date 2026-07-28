@@ -1,0 +1,48 @@
+{
+  "title": "Skyrocket POC Evidence",
+  "overview": "This is the marketing homepage for **Skyrocket**, a fictional product-launch platform. It introduces the product to a visitor, communicates its value proposition, and gives them a way to get started, explore pricing, or get in touch.\n\nThe requirements below trace each of those visitor-facing claims to the tests that prove them.",
+  "about": {
+    "hero": {
+      "title": "The hero section",
+      "body": "The hero section is the first thing a visitor sees when they land on the page. It introduces **Skyrocket** by name, states the core promise in one sentence, and gives the visitor an immediate next step.\n\nThe **Get started free** button is the primary call to action — it should always be visible without scrolling and should link straight into the signup flow."
+    },
+    "navigation": {
+      "title": "Site navigation",
+      "body": "The top navigation bar lets a visitor jump to any major section of the page — **Features**, **Pricing**, and beyond — without needing to scroll to find it."
+    },
+    "pricing": {
+      "title": "Pricing",
+      "body": "Pricing information should be reachable from the main navigation, so a visitor can find cost details before they commit to signing up."
+    },
+    "contact": {
+      "title": "Getting in touch",
+      "body": "The footer includes a direct **contact email** so a visitor with questions can reach the team without hunting for a contact form."
+    }
+  },
+  "requirements": {
+    "FR-TITLE-1": {
+      "description": "The homepage title identifies the product as Skyrocket.",
+      "features": ["hero"]
+    },
+    "FR-HERO-1": {
+      "description": "The hero section communicates the \"launch faster\" value proposition.",
+      "features": ["hero"]
+    },
+    "FR-CTA-1": {
+      "description": "The primary call-to-action links visitors to the get-started section.",
+      "features": ["hero"]
+    },
+    "FR-NAV-1": {
+      "description": "Site navigation provides a way to reach the Features section.",
+      "features": ["navigation"]
+    },
+    "FR-CONTACT-1": {
+      "description": "The footer contact email is present and correctly linked.",
+      "features": ["contact"]
+    },
+    "FR-PRICING-1": {
+      "description": "Pricing information is visible to visitors before signup.",
+      "features": ["pricing"]
+    }
+  }
+}
