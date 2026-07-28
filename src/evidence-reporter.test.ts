@@ -6,10 +6,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // ── Playwright mock ───────────────────────────────────────────────────────────
 //
 // We mock 'playwright' so we can test PDF wiring without launching a real browser.
-// The mock captures what path page.pdf() was called with.
+// The mock captures what path page.pdf() was called with, and — since the file
+// still exists on disk at call-time, before generatePdf's later cleanup — reads
+// back whichever HTML was just loaded, so tests can assert on the actual
+// rendered content of either print pass without needing a real Chromium.
+const loadedHtmlByCall: string[] = [];
 
-const mockPdf = vi.fn().mockResolvedValue(undefined);
-const mockGoto = vi.fn().mockResolvedValue(undefined);
+// Writes a dummy file at the requested path — resolvePageNumbers reads the
+// draft PDF back off disk before ever touching pdfjs-dist, so the file needs
+// to exist even though its contents are irrelevant (getDocument is mocked
+// too, below, and never actually parses these bytes).
+const mockPdf = vi.fn(async (opts: { path: string; [key: string]: unknown }) => {
+  fs.writeFileSync(opts.path, 'fake-pdf-bytes');
+});
+const mockGoto = vi.fn(async (url: string) => {
+  loadedHtmlByCall.push(fs.readFileSync(url.replace('file://', ''), 'utf8'));
+});
 const mockPage = { goto: mockGoto, pdf: mockPdf };
 const mockNewPage = vi.fn().mockResolvedValue(mockPage);
 const mockClose = vi.fn().mockResolvedValue(undefined);
@@ -20,7 +32,28 @@ vi.mock('playwright-core', () => ({
   chromium: { launch: mockLaunch },
 }));
 
-// Dynamic import so the vi.mock above takes effect first.
+// ── pdfjs-dist mock ────────────────────────────────────────────────────────────
+//
+// generatePdf reads its own draft PDF back with pdfjs-dist to resolve page
+// numbers. Real Chromium never runs in these tests, so the "draft PDF" is
+// just whatever mockPdf.mockImplementation left on disk (nothing, by
+// default) — mocking pdfjs-dist too avoids needing a byte-real PDF fixture.
+// Defaults to a zero-page document (no markers resolved); the dedicated
+// "page numbers" tests below override `mockDocument`/`mockGetPage` to
+// exercise real marker-to-page resolution.
+const mockDocument: { numPages: number } = { numPages: 0 };
+const mockGetPage = vi.fn();
+const mockLoadingTaskDestroy = vi.fn().mockResolvedValue(undefined);
+const mockGetDocument = vi.fn(() => ({
+  promise: Promise.resolve({ numPages: mockDocument.numPages, getPage: mockGetPage }),
+  destroy: mockLoadingTaskDestroy,
+}));
+
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
+  getDocument: mockGetDocument,
+}));
+
+// Dynamic import so the vi.mock calls above take effect first.
 const { default: EvidenceReporter, formatTimestamp } = await import('./evidence-reporter.ts');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -87,6 +120,9 @@ describe('EvidenceReporter', () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     vi.setSystemTime(fixedNow);
+    loadedHtmlByCall.length = 0;
+    mockDocument.numPages = 0;
+    mockGetPage.mockReset();
   });
 
   afterEach(() => {
@@ -199,7 +235,9 @@ describe('EvidenceReporter', () => {
       const reporter = new EvidenceReporter({ output: 'pdf', file: pdfFile });
       reporter.onBegin({} as never, {} as never);
       await reporter.onEnd(fullResult);
-      const { path: actualPath } = mockPdf.mock.calls[0][0];
+      // The final (second) pass writes to the real configured path — the
+      // first pass is a throwaway draft used only to resolve page numbers.
+      const { path: actualPath } = mockPdf.mock.calls.at(-1)![0];
       expect(path.dirname(actualPath)).toBe(path.resolve(tmpDir));
       expect(path.basename(actualPath)).toMatch(suffixedPattern('report', 'pdf'));
     });
@@ -208,7 +246,7 @@ describe('EvidenceReporter', () => {
       const reporter = new EvidenceReporter({ output: 'pdf' });
       reporter.onBegin({} as never, {} as never);
       await reporter.onEnd(fullResult);
-      const { path: actualPath } = mockPdf.mock.calls[0][0];
+      const { path: actualPath } = mockPdf.mock.calls.at(-1)![0];
       expect(path.dirname(actualPath)).toBe(path.resolve('.'));
       expect(path.basename(actualPath)).toMatch(suffixedPattern('evidence-report', 'pdf'));
     });
@@ -220,12 +258,12 @@ describe('EvidenceReporter', () => {
       const firstReporter = new EvidenceReporter({ output: 'pdf', file: pdfFile });
       firstReporter.onBegin({} as never, {} as never);
       await firstReporter.onEnd(fullResult);
-      const firstPath = mockPdf.mock.calls[0][0].path;
+      const firstPath = mockPdf.mock.calls.at(-1)![0].path;
 
       const secondReporter = new EvidenceReporter({ output: 'pdf', file: pdfFile });
       secondReporter.onBegin({} as never, {} as never);
       await secondReporter.onEnd(fullResult);
-      const secondPath = mockPdf.mock.calls[1][0].path;
+      const secondPath = mockPdf.mock.calls.at(-1)![0].path;
 
       expect(firstPath).not.toBe(secondPath);
     });
@@ -236,13 +274,13 @@ describe('EvidenceReporter', () => {
       const firstReporter = new EvidenceReporter({ output: 'pdf', file: pdfFile });
       firstReporter.onBegin({} as never, {} as never);
       await firstReporter.onEnd(fullResult);
-      const firstPath = mockPdf.mock.calls[0][0].path;
+      const firstPath = mockPdf.mock.calls.at(-1)![0].path;
 
       vi.setSystemTime(new Date(2026, 6, 24, 14, 45, 0));
       const secondReporter = new EvidenceReporter({ output: 'pdf', file: pdfFile });
       secondReporter.onBegin({} as never, {} as never);
       await secondReporter.onEnd(fullResult);
-      const secondPath = mockPdf.mock.calls[1][0].path;
+      const secondPath = mockPdf.mock.calls.at(-1)![0].path;
 
       expect(firstPath).not.toBe(secondPath);
     });
@@ -252,7 +290,9 @@ describe('EvidenceReporter', () => {
       const reporter = new EvidenceReporter({ output: 'pdf', file: pdfFile });
       reporter.onBegin({} as never, {} as never);
       await reporter.onEnd(fullResult);
-      const [[gotoUrl]] = mockGoto.mock.calls;
+      // The final (second) pass is the one that loads report.html — the
+      // first pass loads the throwaway report-draft.html.
+      const [gotoUrl] = mockGoto.mock.calls.at(-1)!;
       expect(gotoUrl).toMatch(/^file:\/\/.*evidence-screenshots-.*\/report\.html$/);
     });
 
@@ -338,16 +378,73 @@ describe('EvidenceReporter', () => {
         const firstReporter = new EvidenceReporter({ output: 'pdf', file: pdfFile, latest: true });
         firstReporter.onBegin({} as never, {} as never);
         await firstReporter.onEnd(fullResult);
-        const firstPath = mockPdf.mock.calls[0][0].path;
+        const firstPath = mockPdf.mock.calls.at(-1)![0].path;
 
         vi.setSystemTime(new Date(2026, 6, 24, 14, 45, 0));
         const secondReporter = new EvidenceReporter({ output: 'pdf', file: pdfFile, latest: true });
         secondReporter.onBegin({} as never, {} as never);
         await secondReporter.onEnd(fullResult);
-        const secondPath = mockPdf.mock.calls[1][0].path;
+        const secondPath = mockPdf.mock.calls.at(-1)![0].path;
 
         expect(firstPath).toBe(secondPath);
       });
+    });
+  });
+
+  // ── page numbers ────────────────────────────────────────────────────────────
+
+  describe('page numbers', () => {
+    it('launches Chromium once and prints twice, closing the browser only after both passes', async () => {
+      const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf') });
+      reporter.onBegin({} as never, {} as never);
+      await reporter.onEnd(fullResult);
+      expect(mockLaunch).toHaveBeenCalledOnce();
+      expect(mockPdf).toHaveBeenCalledTimes(2);
+      expect(mockClose).toHaveBeenCalledOnce();
+    });
+
+    it('resolves marker positions from the draft PDF and substitutes them into the final pass', async () => {
+      // Simulate the draft PDF landing the Test Case Index marker on page 1
+      // and the test's own marker on page 2.
+      mockDocument.numPages = 2;
+      mockGetPage.mockImplementation((pageNumber: number) => Promise.resolve({
+        getTextContent: () => Promise.resolve({
+          items: [{ str: pageNumber === 1 ? '[[page:test-case-index]]' : '[[page:test-1]]' }],
+        }),
+      }));
+
+      const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf') });
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd(
+        { title: 'Sample test', tags: [], annotations: [] } as never,
+        { status: 'passed', errors: [], steps: [], attachments: [] } as never,
+      );
+      await reporter.onEnd(fullResult);
+
+      const [draftHtml, finalHtml] = loadedHtmlByCall;
+      expect(draftHtml).toContain('[[page:test-1]]');
+
+      // The final (delivered) pass has no use for the markers once resolved.
+      expect(finalHtml).not.toContain('[[page:');
+
+      const indexSection = finalHtml.slice(finalHtml.indexOf('Test Case Index'));
+      expect(indexSection).toContain('>2<');
+    });
+
+    it('resolves an empty map — and so renders blank page references — when the draft PDF has no pages', async () => {
+      mockDocument.numPages = 0;
+
+      const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf') });
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd(
+        { title: 'Sample test', tags: [], annotations: [] } as never,
+        { status: 'passed', errors: [], steps: [], attachments: [] } as never,
+      );
+      await reporter.onEnd(fullResult);
+
+      const [, finalHtml] = loadedHtmlByCall;
+      expect(finalHtml).toContain('<th>Page</th>');
+      expect(finalHtml).not.toContain('[[page:');
     });
   });
 
@@ -362,7 +459,7 @@ describe('EvidenceReporter', () => {
         requirements: { 'FR-LOGIN-1': 'Users can log in with valid credentials' },
       });
       reporter.onBegin({} as never, {} as never);
-      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'] } as never, passingResult);
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'], annotations: [] } as never, passingResult);
       await reporter.onEnd(fullResult);
 
       const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
@@ -378,7 +475,7 @@ describe('EvidenceReporter', () => {
         requirements: { 'FR-LOGIN-1': 'Users can log in' },
       });
       reporter.onBegin({} as never, {} as never);
-      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'] } as never, passingResult);
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'], annotations: [] } as never, passingResult);
       await reporter.onEnd(fullResult);
 
       const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
@@ -392,7 +489,7 @@ describe('EvidenceReporter', () => {
         requirements: { 'FR-LOGIN-1': 'Users can log in' },
       });
       reporter.onBegin({} as never, {} as never);
-      reporter.onTestEnd({ title: 'Unrelated test', tags: ['@not-a-requirement'] } as never, passingResult);
+      reporter.onTestEnd({ title: 'Unrelated test', tags: ['@not-a-requirement'], annotations: [] } as never, passingResult);
       await reporter.onEnd(fullResult);
 
       const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
@@ -406,7 +503,7 @@ describe('EvidenceReporter', () => {
         requirements: { 'FR-LOGIN-1': 'Users can log in' },
       });
       reporter.onBegin({} as never, {} as never);
-      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'] } as never, passingResult);
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'], annotations: [] } as never, passingResult);
       await reporter.onEnd(fullResult);
 
       const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
@@ -417,7 +514,7 @@ describe('EvidenceReporter', () => {
     it('renders no traceability matrix when requirements is omitted, matching pre-patch output', async () => {
       const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
       reporter.onBegin({} as never, {} as never);
-      reporter.onTestEnd({ title: 'Login test', tags: [] } as never, passingResult);
+      reporter.onTestEnd({ title: 'Login test', tags: [], annotations: [] } as never, passingResult);
       await reporter.onEnd(fullResult);
 
       const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
@@ -432,7 +529,7 @@ describe('EvidenceReporter', () => {
         requirements: { 'FR-LOGIN-1': 'Users can log in', 'FR-LOGIN-2': 'Users can log out' },
       });
       reporter.onBegin({} as never, {} as never);
-      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1', '@FR-LOGIN-2'] } as never, passingResult);
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1', '@FR-LOGIN-2'], annotations: [] } as never, passingResult);
       await reporter.onEnd(fullResult);
 
       const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
@@ -448,7 +545,7 @@ describe('EvidenceReporter', () => {
       });
       reporter.onBegin({} as never, {} as never);
       reporter.onTestEnd(
-        { title: 'Login test', tags: ['@FR-LOGIN-1', '@FR-LOGIN-1'] } as never,
+        { title: 'Login test', tags: ['@FR-LOGIN-1', '@FR-LOGIN-1'], annotations: [] } as never,
         passingResult,
       );
       await reporter.onEnd(fullResult);
@@ -465,8 +562,8 @@ describe('EvidenceReporter', () => {
       });
       const failingResult = { status: 'failed', errors: [], steps: [], attachments: [] } as never;
       reporter.onBegin({} as never, {} as never);
-      reporter.onTestEnd({ title: 'Login via form', tags: ['@FR-LOGIN-1'] } as never, passingResult);
-      reporter.onTestEnd({ title: 'Login via SSO', tags: ['@FR-LOGIN-1'] } as never, failingResult);
+      reporter.onTestEnd({ title: 'Login via form', tags: ['@FR-LOGIN-1'], annotations: [] } as never, passingResult);
+      reporter.onTestEnd({ title: 'Login via SSO', tags: ['@FR-LOGIN-1'], annotations: [] } as never, failingResult);
       await reporter.onEnd(fullResult);
 
       const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));

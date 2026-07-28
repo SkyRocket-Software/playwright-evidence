@@ -8,8 +8,9 @@ import {
   renderReport,
   renderRequirementsList,
   renderStep,
+  renderTableOfContents,
   renderTest,
-  renderToc,
+  renderTestCaseIndex,
   renderTraceabilityMatrix,
   runDate,
   stripAnsi,
@@ -48,6 +49,7 @@ const passingTest: TestRecord = {
   steps: [setupStep, evidenceStepPass],
   error: null,
   requirements: [],
+  testId: null,
 };
 
 const failingTest: TestRecord = {
@@ -56,6 +58,7 @@ const failingTest: TestRecord = {
   steps: [evidenceStepFail],
   error: 'Expected "success" but got "error"',
   requirements: [],
+  testId: null,
 };
 
 const skippedTest: TestRecord = {
@@ -64,6 +67,7 @@ const skippedTest: TestRecord = {
   steps: [],
   error: null,
   requirements: [],
+  testId: null,
 };
 
 const requirementLogin: RequirementRecord = {
@@ -281,6 +285,19 @@ describe('renderRequirementsList', () => {
     expect(html).toContain('Users can log in with valid credentials');
   });
 
+  it('styles the requirement id as a muted id-tag, not bold', () => {
+    const html = renderRequirementsList([requirementLogin]);
+    expect(html).toContain('<span class="id-tag">FR-LOGIN-1</span>');
+    expect(html).not.toContain('<strong>');
+  });
+
+  it('capitalizes the first letter of the description', () => {
+    const requirement: RequirementRecord = { id: 'FR-LOWER-1', description: 'users can log out' };
+    const html = renderRequirementsList([requirement]);
+    expect(html).toContain('Users can log out');
+    expect(html).not.toContain('users can log out');
+  });
+
   it('renders one list item per requirement', () => {
     const second: RequirementRecord = { id: 'FR-LOGIN-2', description: 'Users can log out' };
     const html = renderRequirementsList([requirementLogin, second]);
@@ -300,125 +317,259 @@ describe('renderRequirementsList', () => {
 
 describe('renderTest', () => {
   it('includes the test title', () => {
-    const html = renderTest(passingTest, 1);
+    const html = renderTest(passingTest, 1, undefined);
     expect(html).toContain('User can log in');
   });
 
-  it('prefixes the section heading with the 1-based index', () => {
-    const html = renderTest(passingTest, 2);
-    expect(html).toContain('2. User can log in');
+  it('does not prefix the heading with the section index — it is not a stable identifier', () => {
+    const html = renderTest(passingTest, 2, undefined);
+    expect(html).not.toContain('2. User can log in');
+  });
+
+  it('capitalizes the first letter of the title', () => {
+    const test: TestRecord = { ...passingTest, title: 'page title reads Skyrocket' };
+    const html = renderTest(test, 1, undefined);
+    expect(html).toContain('<h2>Page title reads Skyrocket</h2>');
+    expect(html).not.toContain('page title reads');
+  });
+
+  it('renders the test-id as an eyebrow label above the heading, not inside it', () => {
+    const test: TestRecord = { ...passingTest, testId: 'TC-LOGIN-1' };
+    const html = renderTest(test, 1, undefined);
+    expect(html).toContain('<div class="id-tag" style="margin-bottom:4px;">TC-LOGIN-1</div>');
+    expect(html).toContain('<h2>User can log in</h2>');
+    expect(html.indexOf('TC-LOGIN-1')).toBeLessThan(html.indexOf('<h2>'));
+  });
+
+  it('renders just the title with no id-tag label when testId is null', () => {
+    const html = renderTest(passingTest, 1, undefined);
+    expect(html).not.toContain('id-tag');
   });
 
   it('renders a PASS badge for a passing test', () => {
-    const html = renderTest(passingTest, 1);
+    const html = renderTest(passingTest, 1, undefined);
     expect(html).toContain('badge-pass');
     expect(html).toContain('>PASS<');
   });
 
   it('renders a FAIL badge for a failing test', () => {
-    const html = renderTest(failingTest, 1);
+    const html = renderTest(failingTest, 1, undefined);
     expect(html).toContain('badge-fail');
     expect(html).toContain('>FAIL<');
   });
 
   it('renders a SKIP badge for a skipped test', () => {
-    const html = renderTest(skippedTest, 1);
+    const html = renderTest(skippedTest, 1, undefined);
     expect(html).toContain('badge-skipped');
     expect(html).toContain('>SKIP<');
   });
 
   it('shows "No recorded steps" when there are no steps', () => {
-    const html = renderTest(skippedTest, 1);
+    const html = renderTest(skippedTest, 1, undefined);
     expect(html).toContain('No recorded steps');
     expect(html).not.toContain('<table');
   });
 
   it('renders a table when steps are present', () => {
-    const html = renderTest(passingTest, 1);
+    const html = renderTest(passingTest, 1, undefined);
     expect(html).toContain('<table');
     expect(html).not.toContain('No recorded steps');
   });
 
   it('renders an error block when there is an error', () => {
-    const html = renderTest(failingTest, 1);
+    const html = renderTest(failingTest, 1, undefined);
     expect(html).toContain('error-block');
     expect(html).toContain('Expected &quot;success&quot; but got &quot;error&quot;');
   });
 
   it('strips ANSI codes from error messages', () => {
     const test: TestRecord = { ...failingTest, error: '\x1b[31mred error\x1b[0m' };
-    const html = renderTest(test, 1);
+    const html = renderTest(test, 1, undefined);
     expect(html).toContain('red error');
     expect(html).not.toContain('\x1b[');
   });
 
   it('escapes the test title', () => {
     const test: TestRecord = { ...passingTest, title: '<script>alert(1)</script>' };
-    const html = renderTest(test, 1);
+    const html = renderTest(test, 1, undefined);
     expect(html).toContain('&lt;script&gt;');
     expect(html).not.toContain('<script>alert');
   });
 
   it('renders no error block when error is null', () => {
-    const html = renderTest(passingTest, 1);
+    const html = renderTest(passingTest, 1, undefined);
     expect(html).not.toContain('error-block');
   });
 
   it('renders a requirements list when the test has matched requirements', () => {
     const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
-    const html = renderTest(test, 1);
+    const html = renderTest(test, 1, undefined);
     expect(html).toContain('Requirements proven');
     expect(html).toContain('FR-LOGIN-1');
   });
 
   it('renders no requirements list when the test has none', () => {
-    const html = renderTest(passingTest, 1);
+    const html = renderTest(passingTest, 1, undefined);
     expect(html).not.toContain('Requirements proven');
+  });
+
+  it('embeds an invisible page marker in reserve mode', () => {
+    const html = renderTest(passingTest, 3, 'reserve');
+    expect(html).toContain('[[page:test-3]]');
+  });
+
+  it('omits the page marker in html mode', () => {
+    const html = renderTest(passingTest, 3, undefined);
+    expect(html).not.toContain('[[page:');
+  });
+
+  it('omits the page marker once page numbers are resolved — the final PDF has no use for it', () => {
+    const html = renderTest(passingTest, 3, new Map([['test-3', 7]]));
+    expect(html).not.toContain('[[page:');
   });
 });
 
-// ── renderToc ─────────────────────────────────────────────────────────────────
+// ── renderTestCaseIndex ──────────────────────────────────────────────────────
 
-describe('renderToc', () => {
+describe('renderTestCaseIndex', () => {
   it('returns an empty string when there are no tests', () => {
-    expect(renderToc([])).toBe('');
+    expect(renderTestCaseIndex([], undefined)).toBe('');
+  });
+
+  it('titles the section "Test Case Index"', () => {
+    const html = renderTestCaseIndex([passingTest], undefined);
+    expect(html).toContain('Test Case Index');
   });
 
   it('lists each test title', () => {
-    const html = renderToc([passingTest, failingTest]);
+    const html = renderTestCaseIndex([passingTest, failingTest], undefined);
     expect(html).toContain('User can log in');
     expect(html).toContain('Form submits data');
   });
 
-  it('numbers entries in order', () => {
-    const html = renderToc([passingTest, failingTest]);
-    expect(html).toContain('>1<');
-    expect(html).toContain('>2<');
+  it('capitalizes the first letter of each test title', () => {
+    const test: TestRecord = { ...passingTest, title: 'page title reads Skyrocket' };
+    const html = renderTestCaseIndex([test], undefined);
+    expect(html).toContain('Page title reads Skyrocket');
+  });
+
+  it('does not render a bare ordinal "#" column — the id and page columns cover lookup', () => {
+    const html = renderTestCaseIndex([passingTest], undefined);
+    expect(html).not.toContain('<th>#</th>');
+  });
+
+  it('shows a test-id column entry styled as an id-tag when the test has one', () => {
+    const test: TestRecord = { ...passingTest, testId: 'TC-LOGIN-1' };
+    const html = renderTestCaseIndex([test], undefined);
+    expect(html).toContain('<td class="id-tag">TC-LOGIN-1</td>');
+  });
+
+  it('links each row to its section anchor', () => {
+    const html = renderTestCaseIndex([passingTest], undefined);
+    expect(html).toContain('href="#test-1"');
   });
 
   it('renders a PASS badge for a passing test', () => {
-    const html = renderToc([passingTest]);
+    const html = renderTestCaseIndex([passingTest], undefined);
     expect(html).toContain('badge-pass');
     expect(html).toContain('>PASS<');
   });
 
   it('renders a FAIL badge for a failing test', () => {
-    const html = renderToc([failingTest]);
+    const html = renderTestCaseIndex([failingTest], undefined);
     expect(html).toContain('badge-fail');
     expect(html).toContain('>FAIL<');
   });
 
   it('renders a SKIP badge for a skipped test', () => {
-    const html = renderToc([skippedTest]);
+    const html = renderTestCaseIndex([skippedTest], undefined);
     expect(html).toContain('badge-skipped');
     expect(html).toContain('>SKIP<');
   });
 
   it('escapes special characters in test titles', () => {
     const test: TestRecord = { ...passingTest, title: '<script>alert(1)</script>' };
-    const html = renderToc([test]);
+    const html = renderTestCaseIndex([test], undefined);
     expect(html).toContain('&lt;script&gt;');
     expect(html).not.toContain('<script>alert');
+  });
+
+  it('omits the Page column in html mode', () => {
+    const html = renderTestCaseIndex([passingTest], undefined);
+    expect(html).not.toContain('<th>Page</th>');
+  });
+
+  it('includes the Page column header once page numbers are in play', () => {
+    const html = renderTestCaseIndex([passingTest], 'reserve');
+    expect(html).toContain('<th>Page</th>');
+  });
+
+  it('links the resolved page number to the test\'s section', () => {
+    const html = renderTestCaseIndex([passingTest], new Map([['test-1', 4]]));
+    expect(html).toContain('<a href="#test-1">4</a>');
+  });
+
+  it('embeds an invisible page marker in reserve mode', () => {
+    const html = renderTestCaseIndex([passingTest], 'reserve');
+    expect(html).toContain('[[page:test-case-index]]');
+  });
+});
+
+// ── renderTableOfContents ────────────────────────────────────────────────────
+
+describe('renderTableOfContents', () => {
+  it('returns an empty string when there is neither a matrix nor any tests', () => {
+    expect(renderTableOfContents(false, false, undefined)).toBe('');
+  });
+
+  it('titles the section "Table of Contents"', () => {
+    const html = renderTableOfContents(true, true, undefined);
+    expect(html).toContain('Table of Contents');
+  });
+
+  it('lists the Requirements Traceability Matrix only when a matrix exists', () => {
+    const withMatrix = renderTableOfContents(true, false, undefined);
+    const withoutMatrix = renderTableOfContents(false, true, undefined);
+    expect(withMatrix).toContain('Requirements Traceability Matrix');
+    expect(withoutMatrix).not.toContain('Requirements Traceability Matrix');
+  });
+
+  it('lists the Test Case Index and Test Results only when there are tests', () => {
+    const withTests = renderTableOfContents(false, true, undefined);
+    const withoutTests = renderTableOfContents(true, false, undefined);
+    expect(withTests).toContain('Test Case Index');
+    expect(withTests).toContain('Test Results');
+    expect(withoutTests).not.toContain('Test Case Index');
+    expect(withoutTests).not.toContain('Test Results');
+  });
+
+  it('links each entry to its section anchor', () => {
+    const html = renderTableOfContents(true, true, undefined);
+    expect(html).toContain('href="#requirements-matrix"');
+    expect(html).toContain('href="#test-case-index"');
+  });
+
+  it('links "Test Results" to the first test — there is no standalone Test Results section', () => {
+    const html = renderTableOfContents(true, true, undefined);
+    expect(html).toContain('<a href="#test-1">Test Results</a>');
+    expect(html).not.toContain('#test-results');
+  });
+
+  it('omits the Page column in html mode', () => {
+    const html = renderTableOfContents(true, true, undefined);
+    expect(html).not.toContain('<th>Page</th>');
+  });
+
+  it('shows resolved page numbers, linked, for each entry', () => {
+    const pageNumbers = new Map([
+      ['requirements-matrix', 2],
+      ['test-case-index', 3],
+      ['test-1', 4],
+    ]);
+    const html = renderTableOfContents(true, true, pageNumbers);
+    expect(html).toContain('<a href="#requirements-matrix">2</a>');
+    expect(html).toContain('<a href="#test-case-index">3</a>');
+    expect(html).toContain('<a href="#test-1">4</a>');
   });
 });
 
@@ -473,27 +624,60 @@ describe('computeRequirementStatus', () => {
 
 describe('renderTraceabilityMatrix', () => {
   it('returns an empty string when there are no requirements', () => {
-    expect(renderTraceabilityMatrix([], undefined)).toBe('');
+    expect(renderTraceabilityMatrix([], undefined, undefined)).toBe('');
   });
 
   it('lists a requirement from the map with no covering test as missed', () => {
-    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' });
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
     expect(html).toContain('Requirements Traceability Matrix');
     expect(html).toContain('FR-LOGIN-1');
     expect(html).toContain('No test covers this requirement');
     expect(html).toContain('MISSED');
   });
 
+  it('styles the requirement id as an id-tag', () => {
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    expect(html).toContain('class="id-tag"');
+    expect(html).toContain('>FR-LOGIN-1</td>');
+  });
+
+  it('places "Proven by" and the test list in a second real row, sharing the row with the requirement\'s own row rather than a guessed offset', () => {
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    expect(html).toContain('class="detail-label"');
+    expect(html).toContain('>Proven by</td>');
+  });
+
+  it('spans the Result badge across both of a requirement\'s rows', () => {
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    expect(html).toContain('rowspan="2"');
+  });
+
+  it('wraps each requirement\'s two rows in their own tbody, to keep them together across a page break', () => {
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    expect(html).toContain('<tbody class="requirement-group">');
+  });
+
+  it('capitalizes the first letter of the requirement description', () => {
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'users can log in' }, undefined);
+    expect(html).toContain('Users can log in');
+  });
+
   it('lists the covering test and rolled-up status for a requirement proven by a test', () => {
     const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([test], { 'FR-LOGIN-1': 'Users can log in with valid credentials' });
+    const html = renderTraceabilityMatrix([test], { 'FR-LOGIN-1': 'Users can log in with valid credentials' }, undefined);
     expect(html).toContain('User can log in');
     expect(html).toContain('PASS');
   });
 
+  it('capitalizes the first letter of a covering test\'s title', () => {
+    const test: TestRecord = { ...passingTest, title: 'user can log in', requirements: [requirementLogin] };
+    const html = renderTraceabilityMatrix([test], undefined, undefined);
+    expect(html).toContain('User can log in');
+  });
+
   it('includes a requirement referenced only by a test tag and missing from the map', () => {
     const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([test], undefined);
+    const html = renderTraceabilityMatrix([test], undefined, undefined);
     expect(html).toContain('FR-LOGIN-1');
   });
 
@@ -501,12 +685,12 @@ describe('renderTraceabilityMatrix', () => {
     const html = renderTraceabilityMatrix([], {
       'FR-CHANNEL-10': 'Tenth',
       'FR-CHANNEL-2': 'Second',
-    });
+    }, undefined);
     expect(html.indexOf('FR-CHANNEL-2')).toBeLessThan(html.indexOf('FR-CHANNEL-10'));
   });
 
   it('escapes special characters in the requirement id and description', () => {
-    const html = renderTraceabilityMatrix([], { '<b>FR-1</b>': '<script>alert(1)</script>' });
+    const html = renderTraceabilityMatrix([], { '<b>FR-1</b>': '<script>alert(1)</script>' }, undefined);
     expect(html).toContain('&lt;b&gt;FR-1&lt;/b&gt;');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).not.toContain('<script>alert');
@@ -514,7 +698,7 @@ describe('renderTraceabilityMatrix', () => {
 
   it('escapes special characters in a covering test title', () => {
     const test: TestRecord = { ...passingTest, title: '<script>alert(1)</script>', requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([test], undefined);
+    const html = renderTraceabilityMatrix([test], undefined, undefined);
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).not.toContain('<script>alert');
   });
@@ -522,10 +706,47 @@ describe('renderTraceabilityMatrix', () => {
   it('rolls up FAIL when one of two covering tests fails', () => {
     const passing: TestRecord = { ...passingTest, requirements: [requirementLogin] };
     const failing: TestRecord = { ...failingTest, requirements: [requirementLogin] };
-    const html = renderTraceabilityMatrix([passing, failing], { 'FR-LOGIN-1': 'Users can log in' });
+    const html = renderTraceabilityMatrix([passing, failing], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
     expect(html).toContain('>FAIL<');
     expect(html).toContain('User can log in');
     expect(html).toContain('Form submits data');
+  });
+
+  it('colors each covering test\'s (PASS)/(FAIL) to match its actual status', () => {
+    const passing: TestRecord = { ...passingTest, requirements: [requirementLogin] };
+    const failing: TestRecord = { ...failingTest, requirements: [requirementLogin] };
+    const html = renderTraceabilityMatrix([passing, failing], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    expect(html).toContain('<span class="badge-pass">(PASS)</span>');
+    expect(html).toContain('<span class="badge-fail">(FAIL)</span>');
+  });
+
+  it('shows the covering test\'s test-id, styled as an id-tag, ahead of its title', () => {
+    const test: TestRecord = { ...passingTest, testId: 'TC-LOGIN-1', requirements: [requirementLogin] };
+    const html = renderTraceabilityMatrix([test], undefined, undefined);
+    expect(html).toContain('<span class="id-tag">TC-LOGIN-1</span>');
+    expect(html.indexOf('TC-LOGIN-1')).toBeLessThan(html.indexOf('User can log in'));
+  });
+
+  it('shows no page reference in html mode', () => {
+    const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
+    const html = renderTraceabilityMatrix([test], undefined, undefined);
+    expect(html).not.toContain('p. ');
+  });
+
+  it('links a resolved page reference to the covering test\'s section', () => {
+    const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
+    const html = renderTraceabilityMatrix([test], undefined, new Map([['test-1', 5]]));
+    expect(html).toContain('p. <a href="#test-1">5</a>');
+  });
+
+  it('id anchors the section for the Table of Contents to link to', () => {
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
+    expect(html).toContain('id="requirements-matrix"');
+  });
+
+  it('embeds an invisible page marker in reserve mode', () => {
+    const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, 'reserve');
+    expect(html).toContain('[[page:requirements-matrix]]');
   });
 });
 
@@ -565,12 +786,6 @@ describe('renderReport', () => {
     expect(html).toContain('Form submits data');
   });
 
-  it('numbers sections in order', () => {
-    const html = renderReport('R', [passingTest, failingTest], new Date());
-    expect(html).toContain('1. User can log in');
-    expect(html).toContain('2. Form submits data');
-  });
-
   it('shows PASS when there are zero tests', () => {
     // No failures means overall is PASS
     const html = renderReport('R', [], new Date());
@@ -582,9 +797,36 @@ describe('renderReport', () => {
     expect(html).not.toContain('Requirements Traceability Matrix');
   });
 
-  it('renders the traceability matrix before the table of contents when requirementsMap is set', () => {
+  it('renders the table of contents, then the traceability matrix, then the test case index', () => {
     const html = renderReport('R', [passingTest], new Date(), { 'FR-LOGIN-1': 'Users can log in' });
-    expect(html).toContain('Requirements Traceability Matrix');
-    expect(html.indexOf('Requirements Traceability Matrix')).toBeLessThan(html.indexOf('Contents'));
+    expect(html).toContain('<h2>Requirements Traceability Matrix</h2>');
+    expect(html.indexOf('<h2>Table of Contents</h2>')).toBeLessThan(html.indexOf('<h2>Requirements Traceability Matrix</h2>'));
+    expect(html.indexOf('<h2>Requirements Traceability Matrix</h2>')).toBeLessThan(html.indexOf('<h2>Test Case Index</h2>'));
+  });
+
+  it('does not render a standalone Test Results heading — individual tests follow the index directly', () => {
+    const html = renderReport('R', [passingTest], new Date());
+    expect(html).not.toContain('<h2>Test Results</h2>');
+  });
+
+  it('renders no page numbers or markers in html mode', () => {
+    const html = renderReport('R', [passingTest], new Date(), { 'FR-LOGIN-1': 'Users can log in' });
+    expect(html).not.toContain('[[page:');
+    expect(html).not.toContain('<th>Page</th>');
+  });
+
+  it('propagates resolved page numbers through to the table of contents, matrix, and index', () => {
+    const pageNumbers = new Map([
+      ['requirements-matrix', 2],
+      ['test-case-index', 3],
+      ['test-1', 5],
+    ]);
+    const test: TestRecord = { ...passingTest, requirements: [requirementLogin] };
+    const html = renderReport('R', [test], new Date(), { 'FR-LOGIN-1': 'Users can log in' }, pageNumbers);
+    expect(html).toContain('<th>Page</th>');
+    expect(html).not.toContain('[[page:');
+    // Table of Contents' "Test Results" row links to the first test's resolved page.
+    expect(html).toContain('<a href="#test-1">Test Results</a>');
+    expect(html).toContain('<a href="#test-1">5</a>');
   });
 });

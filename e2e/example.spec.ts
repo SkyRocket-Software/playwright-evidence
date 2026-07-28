@@ -1,7 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { evidenceStep, setupStep } from '../dist/index.js';
 
-test('page title reads "Skyrocket — Launch faster"', { tag: '@FR-TITLE-1' }, async ({ page }, testInfo) => {
+test('page title reads "Skyrocket — Launch faster"', {
+  tag: '@FR-TITLE-1',
+  annotation: { type: 'test-id', description: 'TC-TITLE-1' },
+}, async ({ page }, testInfo) => {
   await setupStep('Open the fixture page', async () => {
     await page.goto('/fixture.html');
   });
@@ -11,7 +14,10 @@ test('page title reads "Skyrocket — Launch faster"', { tag: '@FR-TITLE-1' }, a
   });
 });
 
-test('hero heading announces the product name', { tag: '@FR-HERO-1' }, async ({ page }, testInfo) => {
+test('hero heading announces the product name', {
+  tag: '@FR-HERO-1',
+  annotation: { type: 'test-id', description: 'TC-HERO-1' },
+}, async ({ page }, testInfo) => {
   await setupStep('Open the fixture page', async () => {
     await page.goto('/fixture.html');
   });
@@ -21,7 +27,10 @@ test('hero heading announces the product name', { tag: '@FR-HERO-1' }, async ({ 
   });
 });
 
-test('get started button links to the correct anchor', { tag: '@FR-CTA-1' }, async ({ page }, testInfo) => {
+test('get started button links to the correct anchor', {
+  tag: '@FR-CTA-1',
+  annotation: { type: 'test-id', description: 'TC-CTA-1' },
+}, async ({ page }, testInfo) => {
   await setupStep('Open the fixture page', async () => {
     await page.goto('/fixture.html');
   });
@@ -32,7 +41,10 @@ test('get started button links to the correct anchor', { tag: '@FR-CTA-1' }, asy
   });
 });
 
-test('navigation contains the Features link', { tag: '@FR-NAV-1' }, async ({ page }, testInfo) => {
+test('navigation contains the Features link', {
+  tag: '@FR-NAV-1',
+  annotation: { type: 'test-id', description: 'TC-NAV-1' },
+}, async ({ page }, testInfo) => {
   await setupStep('Open the fixture page', async () => {
     await page.goto('/fixture.html');
   });
@@ -140,7 +152,10 @@ test('footer displays the copyright notice', async ({ page }, testInfo) => {
   });
 });
 
-test('contact email links to the correct mailto address', { tag: '@FR-CONTACT-1' }, async ({ page }, testInfo) => {
+test('contact email links to the correct mailto address', {
+  tag: '@FR-CONTACT-1',
+  annotation: { type: 'test-id', description: 'TC-CONTACT-1' },
+}, async ({ page }, testInfo) => {
   await setupStep('Open the fixture page', async () => {
     await page.goto('/fixture.html');
   });
