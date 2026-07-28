@@ -582,6 +582,59 @@ describe('EvidenceReporter', () => {
     });
   });
 
+  // ── describe-block titles ────────────────────────────────────────────────────
+
+  describe('describe-block titles', () => {
+    const passingResult = { status: 'passed', retry: 0, errors: [], steps: [], attachments: [] } as never;
+
+    it('renders the enclosing describe title as a label on the test\'s section', async () => {
+      const fileSuite = { type: 'file', title: 'homepage.spec.ts', parent: undefined };
+      const describeSuite = { type: 'describe', title: 'The homepage', parent: fileSuite };
+      const testCase = { title: 'shows the hero heading', tags: [], annotations: [], parent: describeSuite } as never;
+
+      const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd(testCase, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('<div class="describe-label">The homepage</div>');
+    });
+
+    it('joins nested describe blocks outermost-first', async () => {
+      const fileSuite = { type: 'file', title: 'homepage.spec.ts', parent: undefined };
+      const outerDescribe = { type: 'describe', title: 'The homepage', parent: fileSuite };
+      const innerDescribe = { type: 'describe', title: 'the hero section', parent: outerDescribe };
+      const testCase = { title: 'shows the heading', tags: [], annotations: [], parent: innerDescribe } as never;
+
+      const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd(testCase, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('<div class="describe-label">The homepage › the hero section</div>');
+    });
+
+    it('renders no describe label for a test with no enclosing describe block', async () => {
+      const fileSuite = { type: 'file', title: 'homepage.spec.ts', parent: undefined };
+      const testCase = { title: 'shows the hero heading', tags: [], annotations: [], parent: fileSuite } as never;
+
+      const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd(testCase, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      // '.describe-label' always appears once as a CSS rule in the shared
+      // stylesheet embedded on every page — assert on the rendered element.
+      expect(content).not.toContain('<div class="describe-label">');
+    });
+  });
+
   // ── requirements option ─────────────────────────────────────────────────────
 
   describe('requirements option', () => {

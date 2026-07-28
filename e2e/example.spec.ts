@@ -77,63 +77,70 @@ test('hero subheading describes the product', async ({ page }, testInfo) => {
   });
 });
 
-test('features section heading reads "Everything you need"', async ({ page }, testInfo) => {
-  await setupStep('Open the fixture page', async () => {
-    await page.goto('/fixture.html');
+// Grouped under one describe to demonstrate the report showing "The features
+// section" as a kicker label above each of these tests' own headings — see
+// CLAUDE.md's "Enclosing test.describe(...) title shown as a kicker" design
+// decision. Read alone, a title like "first feature card is labelled..."
+// loses its subject; the describe title restores it.
+test.describe('The features section', () => {
+  test('heading reads "Everything you need"', async ({ page }, testInfo) => {
+    await setupStep('Open the fixture page', async () => {
+      await page.goto('/fixture.html');
+    });
+
+    await setupStep('Scroll down to the Features section', async () => {
+      await page.locator('#features').scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+    });
+
+    await evidenceStep(page, testInfo, 'Confirm the features section heading reads "Everything you need"', async () => {
+      await expect(page.getByRole('heading', { name: 'Everything you need' })).toBeVisible();
+    });
   });
 
-  await setupStep('Scroll down to the Features section', async () => {
-    await page.locator('#features').scrollIntoViewIfNeeded();
-    await page.waitForTimeout(300);
+  test('first feature card is labelled "Instant deploys"', async ({ page }, testInfo) => {
+    await setupStep('Open the fixture page', async () => {
+      await page.goto('/fixture.html');
+    });
+
+    await setupStep('Scroll down to the Features section', async () => {
+      await page.locator('#features').scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+    });
+
+    await evidenceStep(page, testInfo, 'Confirm the first feature card is labelled "Instant deploys"', async () => {
+      await expect(page.getByRole('heading', { name: 'Instant deploys' })).toBeVisible();
+    });
   });
 
-  await evidenceStep(page, testInfo, 'Confirm the features section heading reads "Everything you need"', async () => {
-    await expect(page.getByRole('heading', { name: 'Everything you need' })).toBeVisible();
-  });
-});
+  test('second feature card is labelled "Built-in analytics"', async ({ page }, testInfo) => {
+    await setupStep('Open the fixture page', async () => {
+      await page.goto('/fixture.html');
+    });
 
-test('first feature card is labelled "Instant deploys"', async ({ page }, testInfo) => {
-  await setupStep('Open the fixture page', async () => {
-    await page.goto('/fixture.html');
-  });
+    await setupStep('Scroll down to the Features section', async () => {
+      await page.locator('#features').scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+    });
 
-  await setupStep('Scroll down to the Features section', async () => {
-    await page.locator('#features').scrollIntoViewIfNeeded();
-    await page.waitForTimeout(300);
-  });
-
-  await evidenceStep(page, testInfo, 'Confirm the first feature card is labelled "Instant deploys"', async () => {
-    await expect(page.getByRole('heading', { name: 'Instant deploys' })).toBeVisible();
-  });
-});
-
-test('second feature card is labelled "Built-in analytics"', async ({ page }, testInfo) => {
-  await setupStep('Open the fixture page', async () => {
-    await page.goto('/fixture.html');
+    await evidenceStep(page, testInfo, 'Confirm the second feature card is labelled "Built-in analytics"', async () => {
+      await expect(page.getByRole('heading', { name: 'Built-in analytics' })).toBeVisible();
+    });
   });
 
-  await setupStep('Scroll down to the Features section', async () => {
-    await page.locator('#features').scrollIntoViewIfNeeded();
-    await page.waitForTimeout(300);
-  });
+  test('third feature card is labelled "99.99% uptime SLA"', async ({ page }, testInfo) => {
+    await setupStep('Open the fixture page', async () => {
+      await page.goto('/fixture.html');
+    });
 
-  await evidenceStep(page, testInfo, 'Confirm the second feature card is labelled "Built-in analytics"', async () => {
-    await expect(page.getByRole('heading', { name: 'Built-in analytics' })).toBeVisible();
-  });
-});
+    await setupStep('Scroll down to the Features section', async () => {
+      await page.locator('#features').scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+    });
 
-test('third feature card is labelled "99.99% uptime SLA"', async ({ page }, testInfo) => {
-  await setupStep('Open the fixture page', async () => {
-    await page.goto('/fixture.html');
-  });
-
-  await setupStep('Scroll down to the Features section', async () => {
-    await page.locator('#features').scrollIntoViewIfNeeded();
-    await page.waitForTimeout(300);
-  });
-
-  await evidenceStep(page, testInfo, 'Confirm the third feature card is labelled "99.99% uptime SLA"', async () => {
-    await expect(page.getByRole('heading', { name: '99.99% uptime SLA' })).toBeVisible();
+    await evidenceStep(page, testInfo, 'Confirm the third feature card is labelled "99.99% uptime SLA"', async () => {
+      await expect(page.getByRole('heading', { name: '99.99% uptime SLA' })).toBeVisible();
+    });
   });
 });
 

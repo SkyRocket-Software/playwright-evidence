@@ -150,8 +150,9 @@ export default class EvidenceReporter implements Reporter {
 
     const requirements = this.deriveRequirements(test);
     const testId = this.deriveTestId(test);
+    const describeTitle = this.deriveDescribeTitle(test);
 
-    this.testRecords.set(test, { title: test.title, status, steps, error, requirements, testId });
+    this.testRecords.set(test, { title: test.title, status, steps, error, requirements, testId, describeTitle });
   }
 
   /**
@@ -202,6 +203,25 @@ export default class EvidenceReporter implements Reporter {
   private deriveTestId(test: TestCase): string | null {
     const annotation = test.annotations.find((a) => a.type === 'test-id');
     return annotation?.description ?? null;
+  }
+
+  /**
+   * Walks the chain of enclosing `test.describe(...)` suites (outermost
+   * first), joining their titles into one label. Suites form a strict
+   * `root -> project -> file -> describe -> ... -> describe -> test`
+   * hierarchy (`Suite.type`), so stopping as soon as a suite isn't a
+   * 'describe' naturally excludes the file, project, and root suites —
+   * only author-written describe titles end up in the label. Returns null
+   * when the test has no enclosing describe block at all.
+   */
+  private deriveDescribeTitle(test: TestCase): string | null {
+    const titles: string[] = [];
+    let suite: Suite | undefined = test.parent;
+    while (suite && suite.type === 'describe') {
+      titles.unshift(suite.title);
+      suite = suite.parent;
+    }
+    return titles.length > 0 ? titles.join(' › ') : null;
   }
 
   private collectStep(

@@ -26,6 +26,8 @@ export interface TestRecord {
   requirements: RequirementRecord[];
   /** Stable identifier from a `type: 'test-id'` annotation, or null if the test has none. */
   testId: string | null;
+  /** Enclosing `test.describe(...)` title chain, joined with ' › ', or null if the test has no enclosing describe block. */
+  describeTitle: string | null;
 }
 
 /**
@@ -222,6 +224,7 @@ export function sharedStyles(): string {
     .section-header {
       display: flex;
       align-items: baseline;
+      justify-content: space-between;
       gap: 14px;
       margin-bottom: 16px;
     }
@@ -245,6 +248,20 @@ export function sharedStyles(): string {
       color: #555;
       font-weight: 600;
       white-space: nowrap;
+    }
+
+    /*
+     * A test's enclosing test.describe(...) title, shown as a kicker line
+     * above its heading — restores the "subject" a leaf test title can lose
+     * on its own (e.g. "shows the hero heading" reads as a fragment; with
+     * this above it, the pairing reads as a complete statement). Plain body
+     * font, not monospace like .id-tag — this is authored prose, not an
+     * identifier — and sized between the id-tag and the heading it sits under.
+     */
+    .describe-label {
+      font-size: 13px;
+      color: #555;
+      margin-bottom: 4px;
     }
 
     /*
@@ -509,14 +526,19 @@ export function renderTest(test: TestRecord, index: number, pageNumbers: PageNum
 
   const requirementsBlock = renderRequirementsList(test.requirements);
 
-  const eyebrow = test.testId
+  const testIdEyebrow = test.testId
     ? `<div class="id-tag" style="margin-bottom:4px;">${escapeHtml(test.testId)}</div>`
+    : '';
+
+  const describeEyebrow = test.describeTitle
+    ? `<div class="describe-label">${escapeHtml(capitalizeFirst(test.describeTitle))}</div>`
     : '';
 
   return `
     <div class="section" id="test-${index}">
       ${pageMarker(`test-${index}`, pageNumbers)}
-      ${eyebrow}
+      ${testIdEyebrow}
+      ${describeEyebrow}
       <div class="section-header">
         <h2>${escapeHtml(capitalizeFirst(test.title))}</h2>
         ${badge(badgeText, badgeVariant)}

@@ -51,6 +51,7 @@ const passingTest: TestRecord = {
   error: null,
   requirements: [],
   testId: null,
+  describeTitle: null,
 };
 
 const failingTest: TestRecord = {
@@ -60,6 +61,7 @@ const failingTest: TestRecord = {
   error: 'Expected "success" but got "error"',
   requirements: [],
   testId: null,
+  describeTitle: null,
 };
 
 const skippedTest: TestRecord = {
@@ -69,6 +71,7 @@ const skippedTest: TestRecord = {
   error: null,
   requirements: [],
   testId: null,
+  describeTitle: null,
 };
 
 const flakyTest: TestRecord = {
@@ -78,6 +81,7 @@ const flakyTest: TestRecord = {
   error: null,
   requirements: [],
   testId: null,
+  describeTitle: null,
 };
 
 const requirementLogin: RequirementRecord = {
@@ -358,6 +362,32 @@ describe('renderTest', () => {
   it('renders just the title with no id-tag label when testId is null', () => {
     const html = renderTest(passingTest, 1, undefined);
     expect(html).not.toContain('id-tag');
+  });
+
+  it('renders the enclosing describe title as a label above the heading, restoring the sentence\'s subject', () => {
+    const test: TestRecord = { ...passingTest, describeTitle: 'the homepage' };
+    const html = renderTest(test, 1, undefined);
+    expect(html).toContain('<div class="describe-label">The homepage</div>');
+    expect(html.indexOf('The homepage')).toBeLessThan(html.indexOf('<h2>'));
+  });
+
+  it('renders no describe label when the test has no enclosing describe block', () => {
+    const html = renderTest(passingTest, 1, undefined);
+    expect(html).not.toContain('describe-label');
+  });
+
+  it('renders the test-id eyebrow above the describe label, above the heading', () => {
+    const test: TestRecord = { ...passingTest, testId: 'TC-LOGIN-1', describeTitle: 'the homepage' };
+    const html = renderTest(test, 1, undefined);
+    expect(html.indexOf('TC-LOGIN-1')).toBeLessThan(html.indexOf('The homepage'));
+    expect(html.indexOf('The homepage')).toBeLessThan(html.indexOf('<h2>'));
+  });
+
+  it('escapes special characters in the describe label', () => {
+    const test: TestRecord = { ...passingTest, describeTitle: '<script>alert(1)</script>' };
+    const html = renderTest(test, 1, undefined);
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toContain('<script>alert');
   });
 
   it('renders a PASS badge for a passing test', () => {

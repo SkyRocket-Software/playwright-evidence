@@ -35,6 +35,7 @@ playwright.config.ts   # Playwright config for the POC e2e tests (output: pdf)
 - **Stable test IDs, read from annotations, not tags or titles** — a test can carry a `{ type: 'test-id', description: 'TC-...' }` annotation. Tags are reserved for `--grep` filtering and requirement matching; annotations are Playwright's mechanism for arbitrary metadata, which fits an identifier meant only for display and cross-referencing. Shown as an eyebrow label above a test's section heading, in the Test Case Index's ID column, and ahead of the title in the Traceability Matrix's covering-test list — never invented or renumbered by the report itself, so it survives test reordering, sharding, and `--grep` filtering
 - **Tests are displayed in test-id order, not run order** — `compareTestOrder` sorts id-carrying tests naturally by their test-id (reusing `compareNaturalIds`, the same numeric-suffix-aware comparator used for requirement IDs) ahead of any test with no test-id, which keeps its original relative position. This one sort is computed once in `renderReport` and reused for the Test Case Index, the Traceability Matrix, and the test sections themselves — so a Test Case Index row and the physical page it links to always agree, instead of the index being reordered while the underlying pages stay in run order
 - **One consistent id style everywhere** — every identifier (test-id, requirement id) uses the same small, muted, monospace, never-bold `.id-tag` treatment, whether it's a table cell or inline/eyebrow text. Titles and descriptions next to an id are always plain body weight; bold is reserved for real headings, not for emphasizing one over the other
+- **Enclosing `test.describe(...)` title shown as a kicker, not fused into the test's own sentence** — a leaf test title read alone can lose its subject (e.g. "shows the hero heading" reads as a fragment without knowing what "shows" it). `deriveDescribeTitle` walks `TestCase.parent` while `Suite.type === 'describe'` (suites form a strict `root -> project -> file -> describe -> ... -> test` chain, so this naturally excludes the file/project/root titles), joining nested describes outermost-first with `' › '`. Rendered as its own `.describe-label` line above the heading — plain body font, not the monospace `.id-tag` treatment, since it's authored prose, not an identifier — rather than concatenated into one sentence, because a describe block commonly wraps an entire file's worth of tests, and fusing it into every single test's heading would repeat the same prefix down the whole file instead of reading as one clean sentence per test. Not reflected in the Test Case Index or Traceability Matrix — both are sorted by test-id (see above), so a describe's tests aren't contiguous there anyway
 - **Test and requirement titles are sentence-cased for display** — the first character is capitalized (a data-level transform, applied before `escapeHtml`, not a CSS trick) since Playwright test names are conventionally authored lowercase-first. Step titles and ids are left exactly as authored
 - **PDF page numbers, resolved via a two-pass print** — real page numbers aren't knowable until Chromium has paginated once, so PDF mode prints twice: pass 1 renders with invisible `[[page:ID]]` markers and reserved-but-blank page-number space, then `pdfjs-dist` reads that draft PDF back to map each marker to its page; pass 2 re-renders with the resolved numbers substituted into the same reserved space (so the layout — and the numbers — don't shift between passes) and is the only PDF actually kept. Both passes share one Chromium launch. Page numbers only make sense in PDF mode — HTML mode never renders them. Every page reference is a clickable link to its section, not just a printed number
 - **Report structure** — Cover and the master Table of Contents share page 1 (`#table-of-contents` overrides the usual per-section page break); the Table of Contents links/page-numbers to the Requirements Traceability Matrix (if `requirements` is set), the Test Case Index, and "Test Results" — there's no standalone Test Results section, that entry just links straight to the first test — followed by the individual test sections
@@ -70,6 +71,7 @@ When generating Playwright tests for a project that uses this package, follow th
 - **Step descriptions must be plain English** readable by a non-technical person. Write them as full sentences starting with a verb: "Confirm the...", "Scroll down to...", "Open the...".
 - The `evidenceStep` description must precisely describe the assertion being made — it will be used as the screenshot label.
 - Do not pass `screenshotScale` unless there is a specific reason to override the default.
+- **Wrap each spec file's tests in one top-level `test.describe(...)` named for the page or feature under test** (e.g. `test.describe('The homepage', () => { ... })`). The report shows this title as a label above each test's own heading, restoring context a leaf test title can lose on its own — "shows the hero heading" reads as a fragment without it. Only nest additional `test.describe` blocks when a file covers more than one distinct sub-scenario worth its own label.
 - **If the project's `playwright.config.ts` passes a `requirements` map to the reporter**, tag every test that proves one of those requirements with `{ tag: '@<requirement-id>' }` (the ID must match a key in the `requirements` map exactly, including case). A test can carry more than one tag if it proves more than one requirement. Do not invent a requirement ID that isn't already a key in the map — ask instead.
 - **Whenever a test carries a requirement tag, also give it a stable ID** via `{ annotation: { type: 'test-id', description: 'TC-...' } }`. This is a separate mechanism from the tag: the tag says which requirement the test proves, the annotation says which test this is, independent of its title. Never put a test ID in a tag, a title, or a comment.
 - If neither of the above applies (no `requirements` map in the project's reporter config), omit both the tag and the annotation — don't add them speculatively.
@@ -82,29 +84,31 @@ import { expect } from '@playwright/test';
 import { test } from '@playwright/test';
 import { setupStep, evidenceStep } from '@skyrocket-software/playwright-evidence';
 
-test('page title reads "My App"', async ({ page }, testInfo) => {
-  await setupStep('Open the website', async () => {
-    await page.goto('/');
+test.describe('The homepage', () => {
+  test('page title reads "My App"', async ({ page }, testInfo) => {
+    await setupStep('Open the website', async () => {
+      await page.goto('/');
+    });
+
+    await evidenceStep(page, testInfo, 'Confirm the page title reads "My App"', async () => {
+      await expect(page).toHaveTitle(/My App/);
+    });
   });
 
-  await evidenceStep(page, testInfo, 'Confirm the page title reads "My App"', async () => {
-    await expect(page).toHaveTitle(/My App/);
-  });
-});
+  test('contact email links to the correct mailto address', async ({ page }, testInfo) => {
+    await setupStep('Open the website', async () => {
+      await page.goto('/');
+    });
 
-test('contact email links to the correct mailto address', async ({ page }, testInfo) => {
-  await setupStep('Open the website', async () => {
-    await page.goto('/');
-  });
+    await setupStep('Scroll down to the Contact section', async () => {
+      await page.locator('#contact').scrollIntoViewIfNeeded();
+      await page.waitForTimeout(400);
+    });
 
-  await setupStep('Scroll down to the Contact section', async () => {
-    await page.locator('#contact').scrollIntoViewIfNeeded();
-    await page.waitForTimeout(400);
-  });
-
-  await evidenceStep(page, testInfo, 'Confirm the contact email links to the correct mailto address', async () => {
-    await expect(page.getByRole('link', { name: 'contact@example.com' }))
-      .toHaveAttribute('href', 'mailto:contact@example.com');
+    await evidenceStep(page, testInfo, 'Confirm the contact email links to the correct mailto address', async () => {
+      await expect(page.getByRole('link', { name: 'contact@example.com' }))
+        .toHaveAttribute('href', 'mailto:contact@example.com');
+    });
   });
 });
 ```
