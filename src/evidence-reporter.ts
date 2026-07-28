@@ -97,7 +97,15 @@ interface EvidenceReporterOptions {
  *   reporter: [['@skyrocket-software/playwright-evidence/reporter', { output: 'pdf', file: 'report.pdf', title: 'My Report' }]]
  */
 export default class EvidenceReporter implements Reporter {
-  private tests: TestRecord[] = [];
+  /**
+   * Keyed by the TestCase object rather than a push-only array. Playwright
+   * calls onTestEnd once per attempt when retries are configured, passing the
+   * same TestCase reference each time — keying on it means a later retry's
+   * record replaces the earlier attempt's instead of appending a duplicate
+   * section for the same test, while still tracking rendering order (Map
+   * preserves insertion order; re-setting an existing key doesn't move it).
+   */
+  private testRecords = new Map<TestCase, TestRecord>();
   private startTime!: Date;
   private runId: string = randomSuffix();
   private options: EvidenceReporterOptions;
@@ -106,6 +114,10 @@ export default class EvidenceReporter implements Reporter {
 
   constructor(options: EvidenceReporterOptions = {}) {
     this.options = options;
+  }
+
+  private get tests(): TestRecord[] {
+    return Array.from(this.testRecords.values());
   }
 
   onBegin(_config: unknown, _suite: Suite): void {
@@ -129,12 +141,7 @@ export default class EvidenceReporter implements Reporter {
       }
     }
 
-    const status =
-      result.status === 'passed'
-        ? 'pass'
-        : result.status === 'skipped'
-          ? 'skipped'
-          : 'fail';
+    const status = this.deriveStatus(result);
 
     const error =
       result.errors.length > 0
@@ -142,8 +149,24 @@ export default class EvidenceReporter implements Reporter {
         : null;
 
     const requirements = this.deriveRequirements(test);
+    const testId = this.deriveTestId(test);
 
-    this.tests.push({ title: test.title, status, steps, error, requirements });
+    this.testRecords.set(test, { title: test.title, status, steps, error, requirements, testId });
+  }
+
+  /**
+   * Maps a single attempt's raw result to this report's status vocabulary. A
+   * test that only passed because Playwright retried it (`result.retry > 0`)
+   * is reported as 'flaky' rather than a plain 'pass', so a reviewer can tell
+   * a clean first-try pass from one that needed a second attempt. Since
+   * onTestEnd fires once per attempt and only the latest attempt's record is
+   * kept (see the `testRecords` field), this only needs to reflect the
+   * attempt it's given, not the test's full retry history.
+   */
+  private deriveStatus(result: TestResult): TestRecord['status'] {
+    if (result.status === 'skipped') return 'skipped';
+    if (result.status !== 'passed') return 'fail';
+    return result.retry > 0 ? 'flaky' : 'pass';
   }
 
   /**
@@ -169,6 +192,18 @@ export default class EvidenceReporter implements Reporter {
     return result;
   }
 
+  /**
+   * Reads a test's stable identifier from a `{ type: 'test-id', description: '...' }`
+   * annotation, rather than a tag — tags are for `--grep` filtering (and, here,
+   * requirement matching); annotations are Playwright's mechanism for attaching
+   * arbitrary metadata, which fits an identifier meant only for display and
+   * cross-referencing, not filtering. Returns null when the test has none.
+   */
+  private deriveTestId(test: TestCase): string | null {
+    const annotation = test.annotations.find((a) => a.type === 'test-id');
+    return annotation?.description ?? null;
+  }
+
   private collectStep(
     step: TestStep,
     attachments: TestResult['attachments'],
@@ -176,7 +211,12 @@ export default class EvidenceReporter implements Reporter {
   ): void {
     const status = step.error ? 'fail' : 'pass';
 
-    const match = attachments.find((a) => a.name === step.title);
+    // Consume the matched attachment (rather than just reading it) so two
+    // steps sharing the same title — a copy-paste mistake, or steps generated
+    // in a loop — pair with successive attachments in encounter order instead
+    // of both silently attaching the first one's screenshot.
+    const matchIndex = attachments.findIndex((a) => a.name === step.title);
+    const match = matchIndex === -1 ? undefined : attachments.splice(matchIndex, 1)[0];
     let screenshotBase64: string | null = null;
     let screenshotPath: string | null = null;
     let screenshotLabel: string | null = null;
@@ -228,40 +268,102 @@ export default class EvidenceReporter implements Reporter {
    * PDF mode: renders HTML with sidecar screenshot references into the temp
    * directory, prints to PDF via headless Chromium, then removes the entire
    * temp directory (HTML + screenshots). Only the PDF is written to the output dir.
+   *
+   * Real page numbers (for the Table of Contents, Test Case Index, and the
+   * Traceability Matrix's per-test page references) aren't knowable until
+   * Chromium has actually paginated the content once, so this prints twice:
+   *   1. A throwaway "draft" PDF with placeholder page-number reservations
+   *      and invisible `[[page:ID]]` markers, purely to discover — by reading
+   *      it back with pdfjs-dist — which page each marker landed on.
+   *   2. The final PDF, re-rendered with those resolved page numbers
+   *      substituted into the same reserved space so the layout (and thus
+   *      the page numbers themselves) doesn't shift between passes.
+   * Both passes share a single browser launch — launching Chromium is
+   * expensive enough that doing it twice per PDF would be wasteful.
    */
   private async generatePdf(title: string): Promise<void> {
-    const html = renderReport(title, this.tests, this.startTime, this.options.requirements);
-    const htmlPath = path.join(this.screenshotDir, 'report.html');
-    fs.writeFileSync(htmlPath, html, 'utf8');
-
     const pdfPath = this.resolveOutFile('pdf');
-    await this.writePdf(htmlPath, pdfPath, title, this.startTime);
 
-    // Remove the entire temp directory — HTML and screenshots are transient
+    // Dynamic import keeps startup fast when PDF is not requested,
+    // and avoids a hard import that would fail if playwright is absent.
+    const { chromium } = await import('playwright-core');
+    const browser = await chromium.launch();
+    try {
+      const draftHtml = renderReport(title, this.tests, this.startTime, this.options.requirements, 'reserve');
+      const draftHtmlPath = path.join(this.screenshotDir, 'report-draft.html');
+      fs.writeFileSync(draftHtmlPath, draftHtml, 'utf8');
+      const draftPdfPath = path.join(this.screenshotDir, 'report-draft.pdf');
+      await this.printPdf(browser, draftHtmlPath, draftPdfPath, title, this.startTime);
+
+      const pageNumbers = await this.resolvePageNumbers(draftPdfPath);
+
+      const finalHtml = renderReport(title, this.tests, this.startTime, this.options.requirements, pageNumbers);
+      const finalHtmlPath = path.join(this.screenshotDir, 'report.html');
+      fs.writeFileSync(finalHtmlPath, finalHtml, 'utf8');
+      await this.printPdf(browser, finalHtmlPath, pdfPath, title, this.startTime);
+    } finally {
+      await browser.close();
+    }
+
+    // Remove the entire temp directory — both HTML passes, the draft PDF, and screenshots are transient
     fs.rmSync(this.screenshotDir, { recursive: true });
 
     console.log(`Evidence PDF written to: ${pdfPath}`);
   }
 
   /**
-   * Prints an HTML file to PDF using a headless Chromium browser.
+   * Reads the draft PDF back with pdfjs-dist and locates the invisible
+   * `[[page:ID]]` markers `pageMarker()` (in html.ts) embeds at each
+   * linkable section — the draft's only purpose. Returns a map of marker id
+   * to its 1-based page number; a marker that's somehow not found (it always
+   * should be) is simply absent from the map, and callers render nothing
+   * rather than a wrong number.
+   */
+  private async resolvePageNumbers(pdfPath: string): Promise<Map<string, number>> {
+    // Dynamic import keeps startup fast in html mode, where it's never used.
+    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+
+    const pdfBytes = new Uint8Array(fs.readFileSync(pdfPath));
+    const loadingTask = getDocument({ data: pdfBytes });
+    const pageNumbers = new Map<string, number>();
+
+    try {
+      const document = await loadingTask.promise;
+      for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
+        const page = await document.getPage(pageNumber);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map((item) => ('str' in item ? item.str : '')).join('');
+
+        for (const match of pageText.matchAll(/\[\[page:([^\]]+)\]\]/g)) {
+          if (!pageNumbers.has(match[1])) {
+            pageNumbers.set(match[1], pageNumber);
+          }
+        }
+      }
+    } finally {
+      await loadingTask.destroy();
+    }
+
+    return pageNumbers;
+  }
+
+  /**
+   * Prints an HTML file to PDF in a fresh page of an already-launched browser.
    * Uses the file:// protocol so no local server is needed — safe for CI.
    *
+   * @param browser   - Browser shared across both print passes (see generatePdf)
    * @param htmlPath  - Absolute path to the HTML file to print
    * @param pdfPath   - Absolute path for the PDF output
    * @param title     - Report title shown in the PDF page header
    * @param startTime - Run date shown in the PDF page header
    */
-  private async writePdf(
+  private async printPdf(
+    browser: import('playwright-core').Browser,
     htmlPath: string,
     pdfPath: string,
     title: string,
     startTime: Date,
   ): Promise<void> {
-    // Dynamic import keeps startup fast when PDF is not requested,
-    // and avoids a hard import that would fail if playwright is absent.
-    const { chromium } = await import('playwright-core');
-
     // UTC so this always agrees with the UTC timestamp in the output filename,
     // regardless of the local timezone of the machine generating the PDF.
     const dateStr = `${startTime.toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short', timeZone: 'UTC' })} UTC`;
@@ -284,23 +386,21 @@ export default class EvidenceReporter implements Reporter {
         <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
       </div>`;
 
-    const browser = await chromium.launch();
-    try {
-      const page = await browser.newPage();
-      await page.goto(`file://${htmlPath}`, { waitUntil: 'networkidle' });
-      await page.pdf({
-        path: pdfPath,
-        format: 'A4',
-        printBackground: true,
-        displayHeaderFooter: true,
-        headerTemplate,
-        footerTemplate,
-        // Margins must be large enough to accommodate the header/footer bands.
-        margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
-      });
-    } finally {
-      await browser.close();
-    }
+    const page = await browser.newPage();
+    // 'networkidle' is generally discouraged for real websites (some pages
+    // never go quiet), but this is a closed, self-contained local file with
+    // no ongoing network activity, so it settles reliably here.
+    await page.goto(`file://${htmlPath}`, { waitUntil: 'networkidle' });
+    await page.pdf({
+      path: pdfPath,
+      format: 'A4',
+      printBackground: true,
+      displayHeaderFooter: true,
+      headerTemplate,
+      footerTemplate,
+      // Margins must be large enough to accommodate the header/footer bands.
+      margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
+    });
   }
 
   /**

@@ -11,13 +11,14 @@
 
 ```text
 src/
-  html.ts              # HTML rendering: escapeHtml, stripAnsi, badge, htmlDocument, runDate, renderStep, renderTest, renderReport
+  html.ts              # HTML rendering: escapeHtml, stripAnsi, badge, htmlDocument, runDate, renderStep, renderTest, renderTestCaseIndex, renderTableOfContents, renderTraceabilityMatrix, renderReport
   evidence-reporter.ts # Playwright Reporter implementation — writes output on onEnd()
   step.ts              # setupStep() and evidenceStep() helpers for use in test files
   index.ts             # Public exports: setupStep, evidenceStep, EvidenceStepOptions, EvidenceReporter
 e2e/
   fixture.html         # Local HTML fixture page used by the POC e2e tests
   example.spec.ts      # POC e2e tests demonstrating package usage
+  requirements.json    # Example requirement ID -> description map for the POC's `requirements` option
 playwright.config.ts   # Playwright config for the POC e2e tests (output: pdf)
 ```
 
@@ -31,6 +32,11 @@ playwright.config.ts   # Playwright config for the POC e2e tests (output: pdf)
 - **Screenshot via body buffer** — `page.screenshot()` returns a Buffer passed directly to `testInfo.attach({ body })` in HTML mode, avoiding tmpdir writes; in PDF mode the buffer is written to the sidecar directory instead
 - **Configurable via reporter options** — `output`, `file`, `title`, and `requirements` passed in `playwright.config.ts`
 - **Requirements traceability** — an optional `requirements` map ties test tags to functional requirement IDs, surfacing a per-test "Requirements proven" list and a Requirements Traceability Matrix section with a rolled-up pass/fail/skipped/missed status per requirement
+- **Stable test IDs, read from annotations, not tags or titles** — a test can carry a `{ type: 'test-id', description: 'TC-...' }` annotation. Tags are reserved for `--grep` filtering and requirement matching; annotations are Playwright's mechanism for arbitrary metadata, which fits an identifier meant only for display and cross-referencing. Shown as an eyebrow label above a test's section heading, in the Test Case Index's ID column, and ahead of the title in the Traceability Matrix's covering-test list — never invented or renumbered by the report itself, so it survives test reordering, sharding, and `--grep` filtering, unlike the report's own render-order position
+- **One consistent id style everywhere** — every identifier (test-id, requirement id) uses the same small, muted, monospace, never-bold `.id-tag` treatment, whether it's a table cell or inline/eyebrow text. Titles and descriptions next to an id are always plain body weight; bold is reserved for real headings, not for emphasizing one over the other
+- **Test and requirement titles are sentence-cased for display** — the first character is capitalized (a data-level transform, applied before `escapeHtml`, not a CSS trick) since Playwright test names are conventionally authored lowercase-first. Step titles and ids are left exactly as authored
+- **PDF page numbers, resolved via a two-pass print** — real page numbers aren't knowable until Chromium has paginated once, so PDF mode prints twice: pass 1 renders with invisible `[[page:ID]]` markers and reserved-but-blank page-number space, then `pdfjs-dist` reads that draft PDF back to map each marker to its page; pass 2 re-renders with the resolved numbers substituted into the same reserved space (so the layout — and the numbers — don't shift between passes) and is the only PDF actually kept. Both passes share one Chromium launch. Page numbers only make sense in PDF mode — HTML mode never renders them. Every page reference is a clickable link to its section, not just a printed number
+- **Report structure** — Cover and the master Table of Contents share page 1 (`#table-of-contents` overrides the usual per-section page break); the Table of Contents links/page-numbers to the Requirements Traceability Matrix (if `requirements` is set), the Test Case Index, and "Test Results" — there's no standalone Test Results section, that entry just links straight to the first test — followed by the individual test sections
 - **Reporter is opt-in** — consumers add it explicitly to the `reporter` array in their own `playwright.config.ts`
 
 ## Conventions
@@ -49,7 +55,7 @@ playwright.config.ts   # Playwright config for the POC e2e tests (output: pdf)
 | `file` | `evidence-report.html` / `evidence-report.pdf` | Output filename. A run timestamp plus a short random suffix is always appended before the extension |
 | `latest` | `false` | When `true`, skips the timestamp/suffix and always writes to the exact `file` path (each run overwrites the last) |
 | `title` | `'Test Evidence Report'` | Report heading |
-| `requirements` | `undefined` | Requirement ID -> description map, matched against each test's tags. Adds a per-test "Requirements proven" list and a Requirements Traceability Matrix section |
+| `requirements` | `undefined` | Requirement ID -> description map, matched against each test's tags. Adds a per-test "Requirements proven" list and a Requirements Traceability Matrix section, each covering test listed with its test-id (if tagged, see below) and — in PDF mode — a page reference |
 
 ## Usage for AI-assisted development
 
@@ -63,6 +69,9 @@ When generating Playwright tests for a project that uses this package, follow th
 - **Step descriptions must be plain English** readable by a non-technical person. Write them as full sentences starting with a verb: "Confirm the...", "Scroll down to...", "Open the...".
 - The `evidenceStep` description must precisely describe the assertion being made — it will be used as the screenshot label.
 - Do not pass `screenshotScale` unless there is a specific reason to override the default.
+- **If the project's `playwright.config.ts` passes a `requirements` map to the reporter**, tag every test that proves one of those requirements with `{ tag: '@<requirement-id>' }` (the ID must match a key in the `requirements` map exactly, including case). A test can carry more than one tag if it proves more than one requirement. Do not invent a requirement ID that isn't already a key in the map — ask instead.
+- **Whenever a test carries a requirement tag, also give it a stable ID** via `{ annotation: { type: 'test-id', description: 'TC-...' } }`. This is a separate mechanism from the tag: the tag says which requirement the test proves, the annotation says which test this is, independent of its title. Never put a test ID in a tag, a title, or a comment.
+- If neither of the above applies (no `requirements` map in the project's reporter config), omit both the tag and the annotation — don't add them speculatively.
 
 ### Canonical spec file
 
@@ -99,11 +108,38 @@ test('contact email links to the correct mailto address', async ({ page }, testI
 });
 ```
 
+### Canonical spec file — with requirements traceability
+
+Use this shape instead when the project's reporter config passes a `requirements` map (see the Rules above):
+
+```ts
+// tests/home.spec.ts
+import { expect } from '@playwright/test';
+import { test } from '@playwright/test';
+import { setupStep, evidenceStep } from '@skyrocket-software/playwright-evidence';
+
+test('page title reads "My App"', {
+  tag: '@FR-TITLE-1',
+  annotation: { type: 'test-id', description: 'TC-TITLE-1' },
+}, async ({ page }, testInfo) => {
+  await setupStep('Open the website', async () => {
+    await page.goto('/');
+  });
+
+  await evidenceStep(page, testInfo, 'Confirm the page title reads "My App"', async () => {
+    await expect(page).toHaveTitle(/My App/);
+  });
+});
+```
+
 ### Canonical reporter config (PDF mode)
 
 ```ts
 // playwright.config.ts
 import { defineConfig } from '@playwright/test';
+import fs from 'fs';
+
+const requirements: Record<string, string> = JSON.parse(fs.readFileSync('requirements.json', 'utf8'));
 
 export default defineConfig({
   reporter: [
@@ -111,10 +147,13 @@ export default defineConfig({
       output: 'pdf',
       file: 'evidence-report.pdf',
       title: 'Test Evidence Report',
+      requirements,
     }],
   ],
 });
 ```
+
+Omit `requirements` from the reporter config (and the `fs`/`JSON.parse` lines) for a project with no functional-requirements traceability need — in that case, write tests using the plain canonical spec file above, with no tag or annotation.
 
 ### What to test
 

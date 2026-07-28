@@ -101,6 +101,33 @@ export default defineConfig({
 
 The same pattern works for CSV, YAML, or anything else — read the file and parse it into a `Record<string, string>` before passing it to `requirements`. CSV and YAML both need a parsing library (e.g. `csv-parse`, `yaml`) to handle escaping correctly (quoted fields, embedded commas/colons); JSON needs none, since `JSON.parse` is built in.
 
+#### Tagging a test with the requirement it proves
+
+Tag a test with `@` plus the requirement ID from the `requirements` map (Playwright's [`tag` option](https://playwright.dev/docs/test-annotations#tag-tests), not a comment or a title prefix):
+
+```ts
+test('users can log in with valid credentials', { tag: '@FR-LOGIN-1' }, async ({ page }, testInfo) => {
+  // ...
+});
+```
+
+A test can carry more than one tag if it proves more than one requirement. Any test whose tags include no matching requirement ID is left off the Traceability Matrix entirely; any requirement with no matching test is listed with a `MISSED` status.
+
+#### Giving a test a stable ID
+
+Independently of requirement tags, a test can carry a stable identifier via Playwright's [`annotation` option](https://playwright.dev/docs/test-annotations#annotations):
+
+```ts
+test('users can log in with valid credentials', {
+  tag: '@FR-LOGIN-1',
+  annotation: { type: 'test-id', description: 'TC-LOGIN-1' },
+}, async ({ page }, testInfo) => {
+  // ...
+});
+```
+
+Unlike a tag (which drives `--grep` filtering and requirement matching) or the test title (which can be reworded freely), a `test-id` annotation exists only to identify the test itself. The report shows it — never invented or renumbered — as an eyebrow above the test's section heading, in the Test Case Index's ID column, and ahead of the title in the Traceability Matrix's covering-test list, so the reference survives the test being renamed, reordered, or resharded. It's optional, but recommended for any test tagged with a requirement.
+
 ### Step helpers
 
 Use `setupStep` for navigation and preconditions (rendered muted, no screenshot), and `evidenceStep` for assertions (always captures a screenshot, pass or fail).
@@ -201,9 +228,13 @@ Add the two steps — `Install Playwright browsers` and `Upload evidence report`
 ## Report format
 
 - Cover page with overall PASS/FAIL status and test count
-- One section per test with a step table
+- Table of Contents linking to the Requirements Traceability Matrix (if `requirements` is set) and every test
+- Requirements Traceability Matrix listing each requirement, its covering test(s), and a rolled-up PASS/FAIL/SKIPPED/MISSED status (if `requirements` is set)
+- Test Case Index listing every test's ID (if annotated), title, and result
+- One section per test with a step table, headed by its `test-id` (if annotated) and the requirement(s) it proves (if tagged)
 - Setup steps rendered as muted/italic rows with no badge
 - Evidence steps rendered with PASS/FAIL badge and an embedded screenshot
 - Error output shown inline for failing tests
+- In PDF mode, every page reference (Table of Contents, Test Case Index, Traceability Matrix) is a real, resolved page number and a clickable link to its target
 - PDF includes page headers (report title, run date) and footers (page X of Y)
 - Print-friendly CSS included

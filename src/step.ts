@@ -48,22 +48,37 @@ export async function evidenceStep(
   const { screenshotScale = 'device' } = options;
 
   await test.step(description, async () => {
+    let actionFailed = false;
     let actionError: unknown;
 
     try {
       await action();
     } catch (err) {
+      // Track failure with a flag rather than `actionError !== undefined` —
+      // a literal `throw undefined` inside the action would otherwise be
+      // indistinguishable from no error at all.
+      actionFailed = true;
       actionError = err;
     }
 
     // Screenshot always runs regardless of pass/fail
-    const screenshot = await page.screenshot({ fullPage: false, scale: screenshotScale });
-    await testInfo.attach(description, {
-      body: screenshot,
-      contentType: 'image/png',
-    });
+    try {
+      const screenshot = await page.screenshot({ fullPage: false, scale: screenshotScale });
+      await testInfo.attach(description, {
+        body: screenshot,
+        contentType: 'image/png',
+      });
+    } catch (screenshotError) {
+      // If the action already failed, that's the more useful error for
+      // debugging (e.g. the screenshot failed only because the action's
+      // failure crashed or closed the page) — don't let it mask the real
+      // reason the test failed.
+      if (!actionFailed) {
+        throw screenshotError;
+      }
+    }
 
-    if (actionError !== undefined) {
+    if (actionFailed) {
       throw actionError;
     }
   });
