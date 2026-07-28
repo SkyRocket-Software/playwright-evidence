@@ -739,7 +739,7 @@ describe('EvidenceReporter', () => {
 
       const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
       const content = fs.readFileSync(outFile, 'utf8');
-      expect(content.match(/FR-LOGIN-1/g)?.length).toBe(2); // once in the per-test list, once in the matrix
+      expect(content.match(/FR-LOGIN-1/g)?.length).toBe(3); // once in the per-test list, once as the matrix row's anchor id, once as its visible ID cell
     });
 
     it('rolls up FLAKY in the traceability matrix when a covering test only passed on retry, with no failures', async () => {
@@ -775,6 +775,119 @@ describe('EvidenceReporter', () => {
       expect(matrixSection).toContain('Login via form');
       expect(matrixSection).toContain('Login via SSO');
       expect(matrixSection).toContain('>FAIL<');
+    });
+
+    it('accepts an object-form requirement entry carrying features, alongside plain-string entries', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: {
+          'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] },
+          'FR-OTHER-1': 'Some other requirement',
+        },
+        about: { login: { title: 'Logging in', body: 'Some prose.' } },
+      });
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'], annotations: [] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('Users can log in');
+      expect(content).toContain('<a href="#about-login">Logging in</a>');
+    });
+  });
+
+  // ── about option ────────────────────────────────────────────────────────────
+
+  describe('about option', () => {
+    const passingResult = { status: 'passed', errors: [], steps: [], attachments: [] } as never;
+
+    it('renders an About section for each feature, with a rolled-up status from its requirements\' covering tests', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] } },
+        about: { login: { title: 'Logging in', body: 'Users **sign in** with their credentials.' } },
+      });
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'], annotations: [] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('<h2>Logging in</h2>');
+      expect(content).toContain('<strong>sign in</strong>');
+      const aboutSection = content.slice(content.indexOf('id="about-login"'), content.indexOf('<h2>Requirements Traceability Matrix</h2>'));
+      expect(aboutSection).toContain('class="badge badge-pass"');
+    });
+
+    it('lists a feature\'s requirements linked back to their Matrix row', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] } },
+        about: { login: { title: 'Logging in', body: 'Some prose.' } },
+      });
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'], annotations: [] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('<a href="#requirement-FR-LOGIN-1">FR-LOGIN-1</a>');
+    });
+
+    it('lists About in the Table of Contents, linked to the first feature', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        about: { login: { title: 'Logging in', body: 'Some prose.' } },
+      });
+      reporter.onBegin({} as never, {} as never);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('<a href="#about-login">About</a>');
+    });
+
+    it('renders no About section when the option is omitted — existing reports are unaffected', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in' },
+      });
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'], annotations: [] } as never, passingResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).not.toContain('id="about-');
+      expect(content).not.toContain('>About<');
+    });
+  });
+
+  // ── overview option ─────────────────────────────────────────────────────────
+
+  describe('overview option', () => {
+    it('renders the overview on the cover page', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        overview: 'This app lets visitors **schedule appointments**.',
+      });
+      reporter.onBegin({} as never, {} as never);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('<strong>schedule appointments</strong>');
+    });
+
+    it('renders no overview block when the option is omitted — existing reports are unaffected', async () => {
+      const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      reporter.onBegin({} as never, {} as never);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).not.toContain('class="overview"');
     });
   });
 });
