@@ -19,7 +19,8 @@ export interface RequirementRecord {
 
 export interface TestRecord {
   title: string;
-  status: 'pass' | 'fail' | 'skipped';
+  /** 'flaky' means the test only passed after Playwright retried it, distinct from a clean first-try 'pass'. */
+  status: 'pass' | 'fail' | 'skipped' | 'flaky';
   steps: StepRecord[];
   error: string | null;
   requirements: RequirementRecord[];
@@ -67,8 +68,22 @@ function capitalizeFirst(str: string): string {
   return str.length === 0 ? str : str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-export function badge(text: string, variant: 'pass' | 'fail' | 'skipped' | 'missed'): string {
+export function badge(text: string, variant: 'pass' | 'fail' | 'skipped' | 'missed' | 'flaky'): string {
   return `<span class="badge badge-${variant}">${text}</span>`;
+}
+
+/** Maps a test's status to its badge label and color variant — shared so the Test Case Index and a test's own section heading can't drift apart on what each status looks like. */
+function statusBadge(status: TestRecord['status']): { variant: 'pass' | 'fail' | 'skipped' | 'flaky'; text: string } {
+  switch (status) {
+    case 'pass':
+      return { variant: 'pass', text: 'PASS' };
+    case 'flaky':
+      return { variant: 'flaky', text: 'FLAKY' };
+    case 'skipped':
+      return { variant: 'skipped', text: 'SKIP' };
+    case 'fail':
+      return { variant: 'fail', text: 'FAIL' };
+  }
 }
 
 /**
@@ -84,9 +99,19 @@ function pageMarker(markerId: string, pageNumbers: PageNumbers): string {
   return `<div class="page-marker">[[page:${markerId}]]</div>`;
 }
 
-/** Digits to reserve for a page-number placeholder — a generous upper bound on total page count. */
-function estimateMaxPageDigits(testCount: number): number {
-  return String(testCount + 10).length;
+/**
+ * Digits to reserve for a page-number placeholder — a generous upper bound on
+ * total page count. Both print passes must reserve the exact same width (see
+ * `pageReference`), so this can't be refined using the real page count pass 1
+ * discovers; it has to over-estimate up front. Counting only tests would
+ * undercount a screenshot-heavy suite, where a single test's evidenceSteps can
+ * each force their own page — so this counts every step across every test as a
+ * potential extra page, plus a fixed buffer for the cover/contents/matrix/index
+ * pages ahead of the first test.
+ */
+function estimateMaxPageDigits(tests: TestRecord[]): number {
+  const totalSteps = tests.reduce((sum, test) => sum + test.steps.length, 0);
+  return String(tests.length + totalSteps + 10).length;
 }
 
 const PAGE_REF_PREFIX = '— p. ';
@@ -180,8 +205,10 @@ export function sharedStyles(): string {
     }
     .cover .summary-box.overall-pass { border-color: #1a6b2a; }
     .cover .summary-box.overall-fail { border-color: #a01010; }
+    .cover .summary-box.overall-flaky { border-color: #a86a00; }
     .cover .summary-box .overall.pass-text { color: #1a6b2a; }
     .cover .summary-box .overall.fail-text { color: #a01010; }
+    .cover .summary-box .overall.flaky-text { color: #a86a00; }
 
     /* ── Sections ────────────────────────────────────────── */
     .body {
@@ -250,6 +277,7 @@ export function sharedStyles(): string {
     .badge-fail    { color: #a01010; }
     .badge-skipped { color: #666; }
     .badge-missed  { color: #a01010; }
+    .badge-flaky   { color: #a86a00; }
 
     /* ── Tables ──────────────────────────────────────────── */
     .data-table { width: 100%; border-collapse: collapse; }
@@ -469,8 +497,7 @@ export function renderRequirementsList(requirements: RequirementRecord[]): strin
  * @param pageNumbers - See `PageNumbers` — controls whether an invisible page marker is embedded
  */
 export function renderTest(test: TestRecord, index: number, pageNumbers: PageNumbers): string {
-  const badgeVariant = test.status === 'pass' ? 'pass' : test.status === 'skipped' ? 'skipped' : 'fail';
-  const badgeText = test.status === 'pass' ? 'PASS' : test.status === 'skipped' ? 'SKIP' : 'FAIL';
+  const { variant: badgeVariant, text: badgeText } = statusBadge(test.status);
 
   const stepRows = test.steps
     .map((step, si) => renderStep(step, si + 1))
@@ -519,8 +546,7 @@ export function renderTestCaseIndex(tests: TestRecord[], pageNumbers: PageNumber
 
   const rows = tests.map((test, i) => {
     const num = i + 1;
-    const badgeVariant = test.status === 'pass' ? 'pass' : test.status === 'skipped' ? 'skipped' : 'fail';
-    const badgeText = test.status === 'pass' ? 'PASS' : test.status === 'skipped' ? 'SKIP' : 'FAIL';
+    const { variant: badgeVariant, text: badgeText } = statusBadge(test.status);
     return `
       <tr>
         <td class="id-tag">${test.testId ? escapeHtml(test.testId) : ''}</td>
@@ -602,14 +628,16 @@ export function compareRequirementIds(a: string, b: string): number {
 /**
  * Rolls up a requirement's status from the tests that cover it: 'missed' when
  * no test covers it, 'fail' if any covering test failed, 'skipped' if every
- * covering test was skipped, otherwise 'pass'.
+ * covering test was skipped, 'flaky' if none failed but at least one covering
+ * test needed a retry to pass, otherwise a clean 'pass'.
  */
 export function computeRequirementStatus(
   coveringTests: Array<{ title: string; status: TestRecord['status'] }>,
-): 'pass' | 'fail' | 'skipped' | 'missed' {
+): 'pass' | 'fail' | 'skipped' | 'missed' | 'flaky' {
   if (coveringTests.length === 0) return 'missed';
   if (coveringTests.some((test) => test.status === 'fail')) return 'fail';
   if (coveringTests.every((test) => test.status === 'skipped')) return 'skipped';
+  if (coveringTests.some((test) => test.status === 'flaky')) return 'flaky';
   return 'pass';
 }
 
@@ -649,7 +677,7 @@ export function renderTraceabilityMatrix(
   const ids = Array.from(entries.keys()).sort(compareRequirementIds);
   if (ids.length === 0) return '';
 
-  const maxDigits = estimateMaxPageDigits(tests.length);
+  const maxDigits = estimateMaxPageDigits(tests);
 
   const rows = ids.map((id) => {
     const entry = entries.get(id)!;
@@ -725,10 +753,14 @@ export function renderReport(
   requirementsMap?: Record<string, string>,
   pageNumbers?: PageNumbers,
 ): string {
-  const passed = tests.filter((t) => t.status === 'pass').length;
+  const passed = tests.filter((t) => t.status === 'pass' || t.status === 'flaky').length;
   const failed = tests.filter((t) => t.status === 'fail').length;
   const total = tests.length;
-  const overallStatus = failed === 0 ? 'PASS' : 'FAIL';
+  // A flaky test did pass, but only after a retry — that's not the same
+  // guarantee as a clean run, so it isn't allowed to read as an unqualified
+  // PASS overall. FAIL still takes priority over flaky.
+  const overallStatus: 'PASS' | 'FAIL' | 'FLAKY' =
+    failed > 0 ? 'FAIL' : tests.some((t) => t.status === 'flaky') ? 'FLAKY' : 'PASS';
 
   const matrix = renderTraceabilityMatrix(tests, requirementsMap, pageNumbers);
   const index = renderTestCaseIndex(tests, pageNumbers);
@@ -739,10 +771,10 @@ export function renderReport(
 
   return htmlDocument(title, `
   <div class="cover">
-    <h1>${title}</h1>
+    <h1>${escapeHtml(title)}</h1>
     <p class="meta">Generated: ${runDate(startTime)}</p>
     <div class="summary-box overall-${overallStatus.toLowerCase()}">
-      <div class="overall ${overallStatus === 'PASS' ? 'pass-text' : 'fail-text'}">${overallStatus}</div>
+      <div class="overall ${overallStatus === 'PASS' ? 'pass-text' : overallStatus === 'FLAKY' ? 'flaky-text' : 'fail-text'}">${overallStatus}</div>
       <div>${passed} of ${total} test${total !== 1 ? 's' : ''} passed</div>
     </div>
   </div>

@@ -70,6 +70,15 @@ const skippedTest: TestRecord = {
   testId: null,
 };
 
+const flakyTest: TestRecord = {
+  title: 'Passes on retry',
+  status: 'flaky',
+  steps: [evidenceStepPass],
+  error: null,
+  requirements: [],
+  testId: null,
+};
+
 const requirementLogin: RequirementRecord = {
   id: 'FR-LOGIN-1',
   description: 'Users can log in with valid credentials',
@@ -140,6 +149,10 @@ describe('badge', () => {
 
   it('renders a missed badge', () => {
     expect(badge('MISSED', 'missed')).toBe('<span class="badge badge-missed">MISSED</span>');
+  });
+
+  it('renders a flaky badge', () => {
+    expect(badge('FLAKY', 'flaky')).toBe('<span class="badge badge-flaky">FLAKY</span>');
   });
 });
 
@@ -364,6 +377,12 @@ describe('renderTest', () => {
     expect(html).toContain('>SKIP<');
   });
 
+  it('renders a FLAKY badge for a test that only passed on retry', () => {
+    const html = renderTest(flakyTest, 1, undefined);
+    expect(html).toContain('badge-flaky');
+    expect(html).toContain('>FLAKY<');
+  });
+
   it('shows "No recorded steps" when there are no steps', () => {
     const html = renderTest(skippedTest, 1, undefined);
     expect(html).toContain('No recorded steps');
@@ -485,6 +504,12 @@ describe('renderTestCaseIndex', () => {
     const html = renderTestCaseIndex([skippedTest], undefined);
     expect(html).toContain('badge-skipped');
     expect(html).toContain('>SKIP<');
+  });
+
+  it('renders a FLAKY badge for a test that only passed on retry', () => {
+    const html = renderTestCaseIndex([flakyTest], undefined);
+    expect(html).toContain('badge-flaky');
+    expect(html).toContain('>FLAKY<');
   });
 
   it('escapes special characters in test titles', () => {
@@ -618,6 +643,20 @@ describe('computeRequirementStatus', () => {
       { title: 'b', status: 'fail' },
     ])).toBe('fail');
   });
+
+  it('returns flaky when no test failed but at least one needed a retry to pass', () => {
+    expect(computeRequirementStatus([
+      { title: 'a', status: 'pass' },
+      { title: 'b', status: 'flaky' },
+    ])).toBe('flaky');
+  });
+
+  it('prioritizes fail over a flaky covering test', () => {
+    expect(computeRequirementStatus([
+      { title: 'a', status: 'flaky' },
+      { title: 'b', status: 'fail' },
+    ])).toBe('fail');
+  });
 });
 
 // ── renderTraceabilityMatrix ──────────────────────────────────────────────────
@@ -739,6 +778,22 @@ describe('renderTraceabilityMatrix', () => {
     expect(html).toContain('p. <a href="#test-1">5</a>');
   });
 
+  it('reserves a wider page-number placeholder for a screenshot-heavy suite than test count alone would imply', () => {
+    // A single test with many evidenceSteps can span far more pages than one
+    // test "counts" as — the reserved width must account for that, not just
+    // the number of tests.
+    const shortTest: TestRecord = { ...passingTest, requirements: [requirementLogin], steps: [setupStep] };
+    const longTest: TestRecord = { ...passingTest, requirements: [requirementLogin], steps: Array(95).fill(setupStep) };
+
+    const shortHtml = renderTraceabilityMatrix([shortTest], { 'FR-LOGIN-1': 'Users can log in' }, 'reserve');
+    const longHtml = renderTraceabilityMatrix([longTest], { 'FR-LOGIN-1': 'Users can log in' }, 'reserve');
+
+    const shortWidth = Number(shortHtml.match(/min-width:(\d+)ch/)![1]);
+    const longWidth = Number(longHtml.match(/min-width:(\d+)ch/)![1]);
+
+    expect(longWidth).toBeGreaterThan(shortWidth);
+  });
+
   it('id anchors the section for the Table of Contents to link to', () => {
     const html = renderTraceabilityMatrix([], { 'FR-LOGIN-1': 'Users can log in' }, undefined);
     expect(html).toContain('id="requirements-matrix"');
@@ -758,15 +813,21 @@ describe('renderReport', () => {
     expect(html).toContain('<title>My Evidence Report</title>');
   });
 
+  it('escapes special characters in the title on the cover page', () => {
+    const html = renderReport('<Evil> & "Title"', [], new Date());
+    expect(html).toContain('<h1>&lt;Evil&gt; &amp; &quot;Title&quot;</h1>');
+    expect(html).not.toContain('<h1><Evil>');
+  });
+
   it('shows PASS overall when all tests pass', () => {
     const html = renderReport('R', [passingTest], new Date());
-    expect(html).toContain('overall-pass');
+    expect(html).toContain('class="summary-box overall-pass"');
     expect(html).toContain('>PASS<');
   });
 
   it('shows FAIL overall when any test fails', () => {
     const html = renderReport('R', [passingTest, failingTest], new Date());
-    expect(html).toContain('overall-fail');
+    expect(html).toContain('class="summary-box overall-fail"');
     expect(html).toContain('>FAIL<');
   });
 
@@ -780,6 +841,25 @@ describe('renderReport', () => {
     expect(html).toContain('1 of 1 test passed');
   });
 
+  it('counts a flaky test as passed in the tally — it did pass, just not on the first try', () => {
+    const html = renderReport('R', [passingTest, flakyTest], new Date());
+    expect(html).toContain('2 of 2 tests passed');
+  });
+
+  it('shows FLAKY overall, not PASS, when a test only passed on retry and none failed', () => {
+    const html = renderReport('R', [passingTest, flakyTest], new Date());
+    expect(html).toContain('class="summary-box overall-flaky"');
+    expect(html).toContain('>FLAKY<');
+    expect(html).not.toContain('class="summary-box overall-pass"');
+  });
+
+  it('shows FAIL overall, not FLAKY, when a run has both a failure and a flaky test', () => {
+    const html = renderReport('R', [failingTest, flakyTest], new Date());
+    expect(html).toContain('class="summary-box overall-fail"');
+    expect(html).toContain('>FAIL<');
+    expect(html).not.toContain('class="summary-box overall-flaky"');
+  });
+
   it('includes all test sections', () => {
     const html = renderReport('R', [passingTest, failingTest], new Date());
     expect(html).toContain('User can log in');
@@ -789,7 +869,7 @@ describe('renderReport', () => {
   it('shows PASS when there are zero tests', () => {
     // No failures means overall is PASS
     const html = renderReport('R', [], new Date());
-    expect(html).toContain('overall-pass');
+    expect(html).toContain('class="summary-box overall-pass"');
   });
 
   it('renders no traceability matrix when requirementsMap is omitted', () => {

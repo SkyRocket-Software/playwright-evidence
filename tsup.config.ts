@@ -8,5 +8,5 @@ export default defineConfig({
   format: ['esm'],
   dts: true,
   clean: true,
-  external: ['playwright', '@playwright/test'],
+  external: ['@playwright/test'],
 });

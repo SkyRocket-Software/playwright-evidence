@@ -243,12 +243,23 @@ describe('EvidenceReporter', () => {
     });
 
     it('defaults PDF path to evidence-report-<timestamp>-<suffix>.pdf when no file is set', async () => {
-      const reporter = new EvidenceReporter({ output: 'pdf' });
-      reporter.onBegin({} as never, {} as never);
-      await reporter.onEnd(fullResult);
-      const { path: actualPath } = mockPdf.mock.calls.at(-1)![0];
-      expect(path.dirname(actualPath)).toBe(path.resolve('.'));
-      expect(path.basename(actualPath)).toMatch(suffixedPattern('evidence-report', 'pdf'));
+      // resolveOutFile resolves the default filename against process.cwd() —
+      // chdir into tmpDir first so the mock (which genuinely writes bytes to
+      // whatever path it's given) doesn't leave a real file in the repo root.
+      // Verified via findMatch (fs.readdirSync) rather than a string compare
+      // against tmpDir, since process.cwd() returns the symlink-resolved path
+      // on macOS (/private/tmp/... vs. tmpDir's /tmp/...) and a direct string
+      // comparison would falsely fail despite the file landing in the right place.
+      const originalCwd = process.cwd();
+      process.chdir(tmpDir);
+      try {
+        const reporter = new EvidenceReporter({ output: 'pdf' });
+        reporter.onBegin({} as never, {} as never);
+        await reporter.onEnd(fullResult);
+        findMatch(tmpDir, suffixedPattern('evidence-report', 'pdf'));
+      } finally {
+        process.chdir(originalCwd);
+      }
     });
 
     it('produces different filenames for two runs started at the exact same instant (e.g. parallel CI shards), so they do not overwrite each other', async () => {
@@ -448,6 +459,129 @@ describe('EvidenceReporter', () => {
     });
   });
 
+  // ── retries ──────────────────────────────────────────────────────────────────
+
+  describe('retries', () => {
+    it('replaces an earlier failing attempt with a later passing one, rather than reporting both', async () => {
+      const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      const testCase = { title: 'Flaky test', tags: [], annotations: [] } as never;
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd(testCase, { status: 'failed', retry: 0, errors: [], steps: [], attachments: [] } as never);
+      reporter.onTestEnd(testCase, { status: 'passed', retry: 1, errors: [], steps: [], attachments: [] } as never);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      // Exactly one test section (id="test-1") — no id="test-2" from a
+      // duplicate second attempt. The title itself legitimately appears
+      // twice by design (once in the Test Case Index, once as the section
+      // heading), so counting title occurrences wouldn't detect a duplicate.
+      expect(content).toContain('id="test-1"');
+      expect(content).not.toContain('id="test-2"');
+      expect(content).toContain('1 of 1 test passed');
+    });
+
+    it('marks a test that only passed on retry as flaky, not a plain pass', async () => {
+      const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      const testCase = { title: 'Flaky test', tags: [], annotations: [] } as never;
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd(testCase, { status: 'failed', retry: 0, errors: [], steps: [], attachments: [] } as never);
+      reporter.onTestEnd(testCase, { status: 'passed', retry: 1, errors: [], steps: [], attachments: [] } as never);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('class="badge badge-flaky"');
+      expect(content).toContain('>FLAKY<');
+    });
+
+    it('reports a test that passes on the first attempt as a plain pass, not flaky', async () => {
+      const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      const testCase = { title: 'Solid test', tags: [], annotations: [] } as never;
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd(testCase, { status: 'passed', retry: 0, errors: [], steps: [], attachments: [] } as never);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      // `.badge-flaky` always appears once as a CSS rule in the shared
+      // stylesheet embedded on every page, regardless of whether any test
+      // uses it — assert on the actual rendered badge markup instead.
+      expect(content).not.toContain('class="badge badge-flaky"');
+      expect(content).toContain('class="badge badge-pass"');
+    });
+
+    it('reports a test that still fails after exhausting retries as a single failure, not flaky', async () => {
+      const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      const testCase = { title: 'Always fails', tags: [], annotations: [] } as never;
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd(testCase, { status: 'failed', retry: 0, errors: [], steps: [], attachments: [] } as never);
+      reporter.onTestEnd(testCase, { status: 'failed', retry: 1, errors: [], steps: [], attachments: [] } as never);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('id="test-1"');
+      expect(content).not.toContain('id="test-2"');
+      expect(content).toContain('class="badge badge-fail"');
+      expect(content).not.toContain('class="badge badge-flaky"');
+    });
+
+    it('keeps two distinct tests separate even though their result objects look alike', async () => {
+      const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd(
+        { title: 'Test A', tags: [], annotations: [] } as never,
+        { status: 'passed', retry: 0, errors: [], steps: [], attachments: [] } as never,
+      );
+      reporter.onTestEnd(
+        { title: 'Test B', tags: [], annotations: [] } as never,
+        { status: 'passed', retry: 0, errors: [], steps: [], attachments: [] } as never,
+      );
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      expect(content).toContain('Test A');
+      expect(content).toContain('Test B');
+      expect(content).toContain('2 of 2 tests passed');
+    });
+  });
+
+  // ── screenshot attribution ───────────────────────────────────────────────────
+
+  describe('screenshot attribution', () => {
+    it('pairs same-titled steps with their own attachment in encounter order, rather than both showing the first one', async () => {
+      const reporter = new EvidenceReporter({ file: path.join(tmpDir, 'report.html') });
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd(
+        { title: 'Duplicate-titled steps', tags: [], annotations: [] } as never,
+        {
+          status: 'passed',
+          retry: 0,
+          errors: [],
+          steps: [
+            { category: 'test.step', title: 'Confirm the same thing', steps: [] },
+            { category: 'test.step', title: 'Confirm the same thing', steps: [] },
+          ],
+          attachments: [
+            { name: 'Confirm the same thing', contentType: 'image/png', body: Buffer.from('first') },
+            { name: 'Confirm the same thing', contentType: 'image/png', body: Buffer.from('second') },
+          ],
+        } as never,
+      );
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      const firstBase64 = Buffer.from('first').toString('base64');
+      const secondBase64 = Buffer.from('second').toString('base64');
+      expect(content).toContain(firstBase64);
+      expect(content).toContain(secondBase64);
+      expect(content.indexOf(firstBase64)).toBeLessThan(content.indexOf(secondBase64));
+    });
+  });
+
   // ── requirements option ─────────────────────────────────────────────────────
 
   describe('requirements option', () => {
@@ -553,6 +687,22 @@ describe('EvidenceReporter', () => {
       const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
       const content = fs.readFileSync(outFile, 'utf8');
       expect(content.match(/FR-LOGIN-1/g)?.length).toBe(2); // once in the per-test list, once in the matrix
+    });
+
+    it('rolls up FLAKY in the traceability matrix when a covering test only passed on retry, with no failures', async () => {
+      const reporter = new EvidenceReporter({
+        file: path.join(tmpDir, 'report.html'),
+        requirements: { 'FR-LOGIN-1': 'Users can log in' },
+      });
+      const flakyResult = { status: 'passed', retry: 1, errors: [], steps: [], attachments: [] } as never;
+      reporter.onBegin({} as never, {} as never);
+      reporter.onTestEnd({ title: 'Login via form', tags: ['@FR-LOGIN-1'], annotations: [] } as never, flakyResult);
+      await reporter.onEnd(fullResult);
+
+      const outFile = findMatch(tmpDir, suffixedPattern('report', 'html'));
+      const content = fs.readFileSync(outFile, 'utf8');
+      const matrixSection = content.slice(content.indexOf('Requirements Traceability Matrix'));
+      expect(matrixSection).toContain('>FLAKY<');
     });
 
     it('rolls up FAIL in the traceability matrix when one of two tests covering a requirement fails', async () => {

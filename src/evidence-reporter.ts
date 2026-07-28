@@ -97,7 +97,15 @@ interface EvidenceReporterOptions {
  *   reporter: [['@skyrocket-software/playwright-evidence/reporter', { output: 'pdf', file: 'report.pdf', title: 'My Report' }]]
  */
 export default class EvidenceReporter implements Reporter {
-  private tests: TestRecord[] = [];
+  /**
+   * Keyed by the TestCase object rather than a push-only array. Playwright
+   * calls onTestEnd once per attempt when retries are configured, passing the
+   * same TestCase reference each time — keying on it means a later retry's
+   * record replaces the earlier attempt's instead of appending a duplicate
+   * section for the same test, while still tracking rendering order (Map
+   * preserves insertion order; re-setting an existing key doesn't move it).
+   */
+  private testRecords = new Map<TestCase, TestRecord>();
   private startTime!: Date;
   private runId: string = randomSuffix();
   private options: EvidenceReporterOptions;
@@ -106,6 +114,10 @@ export default class EvidenceReporter implements Reporter {
 
   constructor(options: EvidenceReporterOptions = {}) {
     this.options = options;
+  }
+
+  private get tests(): TestRecord[] {
+    return Array.from(this.testRecords.values());
   }
 
   onBegin(_config: unknown, _suite: Suite): void {
@@ -129,12 +141,7 @@ export default class EvidenceReporter implements Reporter {
       }
     }
 
-    const status =
-      result.status === 'passed'
-        ? 'pass'
-        : result.status === 'skipped'
-          ? 'skipped'
-          : 'fail';
+    const status = this.deriveStatus(result);
 
     const error =
       result.errors.length > 0
@@ -144,7 +151,22 @@ export default class EvidenceReporter implements Reporter {
     const requirements = this.deriveRequirements(test);
     const testId = this.deriveTestId(test);
 
-    this.tests.push({ title: test.title, status, steps, error, requirements, testId });
+    this.testRecords.set(test, { title: test.title, status, steps, error, requirements, testId });
+  }
+
+  /**
+   * Maps a single attempt's raw result to this report's status vocabulary. A
+   * test that only passed because Playwright retried it (`result.retry > 0`)
+   * is reported as 'flaky' rather than a plain 'pass', so a reviewer can tell
+   * a clean first-try pass from one that needed a second attempt. Since
+   * onTestEnd fires once per attempt and only the latest attempt's record is
+   * kept (see the `testRecords` field), this only needs to reflect the
+   * attempt it's given, not the test's full retry history.
+   */
+  private deriveStatus(result: TestResult): TestRecord['status'] {
+    if (result.status === 'skipped') return 'skipped';
+    if (result.status !== 'passed') return 'fail';
+    return result.retry > 0 ? 'flaky' : 'pass';
   }
 
   /**
@@ -189,7 +211,12 @@ export default class EvidenceReporter implements Reporter {
   ): void {
     const status = step.error ? 'fail' : 'pass';
 
-    const match = attachments.find((a) => a.name === step.title);
+    // Consume the matched attachment (rather than just reading it) so two
+    // steps sharing the same title — a copy-paste mistake, or steps generated
+    // in a loop — pair with successive attachments in encounter order instead
+    // of both silently attaching the first one's screenshot.
+    const matchIndex = attachments.findIndex((a) => a.name === step.title);
+    const match = matchIndex === -1 ? undefined : attachments.splice(matchIndex, 1)[0];
     let screenshotBase64: string | null = null;
     let screenshotPath: string | null = null;
     let screenshotLabel: string | null = null;
@@ -360,6 +387,9 @@ export default class EvidenceReporter implements Reporter {
       </div>`;
 
     const page = await browser.newPage();
+    // 'networkidle' is generally discouraged for real websites (some pages
+    // never go quiet), but this is a closed, self-contained local file with
+    // no ongoing network activity, so it settles reliably here.
     await page.goto(`file://${htmlPath}`, { waitUntil: 'networkidle' });
     await page.pdf({
       path: pdfPath,
