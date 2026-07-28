@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   badge,
-  compareRequirementIds,
+  compareNaturalIds,
+  compareTestOrder,
   computeRequirementStatus,
   escapeHtml,
   htmlDocument,
@@ -598,20 +599,42 @@ describe('renderTableOfContents', () => {
   });
 });
 
-// ── compareRequirementIds ────────────────────────────────────────────────────
+// ── compareNaturalIds ────────────────────────────────────────────────────────
 
-describe('compareRequirementIds', () => {
+describe('compareNaturalIds', () => {
   it('sorts numeric suffixes naturally rather than lexicographically', () => {
     const ids = ['FR-CHANNEL-10', 'FR-CHANNEL-2', 'FR-CHANNEL-1'];
-    expect([...ids].sort(compareRequirementIds)).toEqual(['FR-CHANNEL-1', 'FR-CHANNEL-2', 'FR-CHANNEL-10']);
+    expect([...ids].sort(compareNaturalIds)).toEqual(['FR-CHANNEL-1', 'FR-CHANNEL-2', 'FR-CHANNEL-10']);
   });
 
   it('falls back to string comparison when prefixes differ', () => {
-    expect(compareRequirementIds('FR-A-1', 'FR-B-1')).toBeLessThan(0);
+    expect(compareNaturalIds('FR-A-1', 'FR-B-1')).toBeLessThan(0);
   });
 
   it('falls back to string comparison when an id has no numeric suffix', () => {
-    expect(compareRequirementIds('FR-ALPHA', 'FR-BETA')).toBeLessThan(0);
+    expect(compareNaturalIds('FR-ALPHA', 'FR-BETA')).toBeLessThan(0);
+  });
+});
+
+// ── compareTestOrder ─────────────────────────────────────────────────────────
+
+describe('compareTestOrder', () => {
+  it('sorts two id-carrying tests naturally by their test-id', () => {
+    const a: TestRecord = { ...passingTest, testId: 'TC-LOGIN-10' };
+    const b: TestRecord = { ...passingTest, testId: 'TC-LOGIN-2' };
+    expect([a, b].sort(compareTestOrder)).toEqual([b, a]);
+  });
+
+  it('orders a test with a test-id ahead of one without', () => {
+    const withId: TestRecord = { ...passingTest, testId: 'TC-LOGIN-1' };
+    const withoutId: TestRecord = { ...passingTest, testId: null };
+    expect([withoutId, withId].sort(compareTestOrder)).toEqual([withId, withoutId]);
+  });
+
+  it('leaves the relative order of two id-less tests unchanged', () => {
+    const first: TestRecord = { ...passingTest, title: 'Runs first', testId: null };
+    const second: TestRecord = { ...passingTest, title: 'Runs second', testId: null };
+    expect([first, second].sort(compareTestOrder)).toEqual([first, second]);
   });
 });
 
@@ -908,5 +931,36 @@ describe('renderReport', () => {
     // Table of Contents' "Test Results" row links to the first test's resolved page.
     expect(html).toContain('<a href="#test-1">Test Results</a>');
     expect(html).toContain('<a href="#test-1">5</a>');
+  });
+
+  it('orders both the Test Case Index and the test sections by test-id, so a row and its page always match', () => {
+    const testC: TestRecord = { ...passingTest, title: 'Runs third', testId: 'TC-LOGIN-10' };
+    const testA: TestRecord = { ...passingTest, title: 'Runs first', testId: 'TC-LOGIN-1' };
+    const testB: TestRecord = { ...passingTest, title: 'Runs second', testId: 'TC-LOGIN-2' };
+    const html = renderReport('R', [testC, testA, testB], new Date());
+
+    // Test Case Index rows read top-to-bottom in id order.
+    const indexSection = html.slice(html.indexOf('Test Case Index'), html.indexOf('id="test-1"'));
+    expect(indexSection.indexOf('TC-LOGIN-1')).toBeLessThan(indexSection.indexOf('TC-LOGIN-2'));
+    expect(indexSection.indexOf('TC-LOGIN-2')).toBeLessThan(indexSection.indexOf('TC-LOGIN-10'));
+
+    // The physical sections (their <h2> headings) follow the same order, not
+    // the original array order — checked via <h2> since the index also
+    // mentions each title, just not wrapped in a heading tag.
+    expect(html.indexOf('<h2>Runs first</h2>')).toBeLessThan(html.indexOf('<h2>Runs second</h2>'));
+    expect(html.indexOf('<h2>Runs second</h2>')).toBeLessThan(html.indexOf('<h2>Runs third</h2>'));
+
+    // Each index row's link lands on the section that actually carries its id.
+    expect(html).toContain('<td class="id-tag">TC-LOGIN-1</td>\n        <td><a href="#test-1">Runs first</a>');
+  });
+
+  it('appends tests with no test-id after all id-carrying tests, in their original relative order', () => {
+    const withId: TestRecord = { ...passingTest, title: 'Has an id', testId: 'TC-LOGIN-1' };
+    const noIdFirst: TestRecord = { ...passingTest, title: 'No id, ran first', testId: null };
+    const noIdSecond: TestRecord = { ...passingTest, title: 'No id, ran second', testId: null };
+    const html = renderReport('R', [noIdFirst, noIdSecond, withId], new Date());
+
+    expect(html.indexOf('Has an id')).toBeLessThan(html.indexOf('No id, ran first'));
+    expect(html.indexOf('No id, ran first')).toBeLessThan(html.indexOf('No id, ran second'));
   });
 });

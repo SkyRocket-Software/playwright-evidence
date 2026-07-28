@@ -610,19 +610,33 @@ export function renderTableOfContents(
 }
 
 /**
- * Natural-sort comparator for requirement IDs sharing a common prefix ending in
- * a number (e.g. 'FR-CHANNEL-2' before 'FR-CHANNEL-10') — plain string
- * comparison would otherwise put 'FR-CHANNEL-10' right after 'FR-CHANNEL-1'.
- * Falls back to a plain string comparison when the prefixes differ or either
- * ID doesn't end in a number.
+ * Natural-sort comparator for IDs (requirement or test) sharing a common
+ * prefix ending in a number (e.g. 'FR-CHANNEL-2' before 'FR-CHANNEL-10') —
+ * plain string comparison would otherwise put 'FR-CHANNEL-10' right after
+ * 'FR-CHANNEL-1'. Falls back to a plain string comparison when the prefixes
+ * differ or either ID doesn't end in a number.
  */
-export function compareRequirementIds(a: string, b: string): number {
+export function compareNaturalIds(a: string, b: string): number {
   const matchA = a.match(/^(.*-)(\d+)$/);
   const matchB = b.match(/^(.*-)(\d+)$/);
   if (matchA && matchB && matchA[1] === matchB[1]) {
     return Number(matchA[2]) - Number(matchB[2]);
   }
   return a.localeCompare(b);
+}
+
+/**
+ * Orders tests for display: those with a `test-id` first, sorted naturally by
+ * that id (see `compareNaturalIds`) so the Test Case Index reads top-to-bottom
+ * in id order instead of requiring a scan to find one — then any tests with
+ * no test-id, left in their original relative order (Array.prototype.sort is
+ * stable, so returning 0 for that pair is enough to preserve it).
+ */
+export function compareTestOrder(a: TestRecord, b: TestRecord): number {
+  if (a.testId !== null && b.testId !== null) return compareNaturalIds(a.testId, b.testId);
+  if (a.testId !== null) return -1;
+  if (b.testId !== null) return 1;
+  return 0;
 }
 
 /**
@@ -674,7 +688,7 @@ export function renderTraceabilityMatrix(
     }
   });
 
-  const ids = Array.from(entries.keys()).sort(compareRequirementIds);
+  const ids = Array.from(entries.keys()).sort(compareNaturalIds);
   if (ids.length === 0) return '';
 
   const maxDigits = estimateMaxPageDigits(tests);
@@ -753,19 +767,25 @@ export function renderReport(
   requirementsMap?: Record<string, string>,
   pageNumbers?: PageNumbers,
 ): string {
-  const passed = tests.filter((t) => t.status === 'pass' || t.status === 'flaky').length;
-  const failed = tests.filter((t) => t.status === 'fail').length;
-  const total = tests.length;
+  // Sorted once and used for everything below (matrix, index, sections) so a
+  // test's Test Case Index row and its actual section land at the same
+  // position — id-sorted tests read top-to-bottom by id in both places,
+  // rather than the index being reordered while pages stay in run order.
+  const orderedTests = [...tests].sort(compareTestOrder);
+
+  const passed = orderedTests.filter((t) => t.status === 'pass' || t.status === 'flaky').length;
+  const failed = orderedTests.filter((t) => t.status === 'fail').length;
+  const total = orderedTests.length;
   // A flaky test did pass, but only after a retry — that's not the same
   // guarantee as a clean run, so it isn't allowed to read as an unqualified
   // PASS overall. FAIL still takes priority over flaky.
   const overallStatus: 'PASS' | 'FAIL' | 'FLAKY' =
-    failed > 0 ? 'FAIL' : tests.some((t) => t.status === 'flaky') ? 'FLAKY' : 'PASS';
+    failed > 0 ? 'FAIL' : orderedTests.some((t) => t.status === 'flaky') ? 'FLAKY' : 'PASS';
 
-  const matrix = renderTraceabilityMatrix(tests, requirementsMap, pageNumbers);
-  const index = renderTestCaseIndex(tests, pageNumbers);
-  const tableOfContents = renderTableOfContents(matrix !== '', tests.length > 0, pageNumbers);
-  const testSections = tests
+  const matrix = renderTraceabilityMatrix(orderedTests, requirementsMap, pageNumbers);
+  const index = renderTestCaseIndex(orderedTests, pageNumbers);
+  const tableOfContents = renderTableOfContents(matrix !== '', orderedTests.length > 0, pageNumbers);
+  const testSections = orderedTests
     .map((t, i) => renderTest(t, i + 1, pageNumbers))
     .join('\n');
 
