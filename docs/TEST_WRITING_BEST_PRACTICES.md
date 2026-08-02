@@ -80,7 +80,36 @@ exception to justify, not the default. When in doubt, ask what a reviewer
 would need to see to believe the end state is meaningful, and check whether
 `setupStep` is hiding it.
 
+## What to test without a FUNCTIONAL_REQUIREMENTS.md yet
+
+Everything above still applies with no requirements doc in place — setup vs.
+evidence, atomic steps, before/after for state changes. What changes is
+traceability: skip the `tag` and `test-id` annotation entirely (see below)
+rather than adding them speculatively, and write a plain `test()`.
+
+Without a requirements doc to test *against*, treat these as a floor, not a
+ceiling — a starting point for what deserves an `evidenceStep`, not a
+substitute for asking what the feature actually needs to prove (see "Test
+the consequence, not the mechanics" below, which still applies once a
+project has anything worth calling a functional requirement):
+
+- Page title
+- Key headings or taglines visible on the page
+- Link `href` values
+- Visible text that is part of the product's identity or claims
+- Form elements, CTA buttons, or navigation items
+- Visible action results (toasts, form results, etc.)
+
+Only write a test for something a DOM assertion can actually verify.
+
 ## Traceability lives in the test tag, not the step text
+
+Both this convention and the stable-ID one below it are opt-in per project:
+they apply once a project maintains `FUNCTIONAL_REQUIREMENTS.md` and tags
+tests against it. A project with no such doc yet should skip the tag and
+the `test-id` annotation entirely rather than adding either speculatively in
+case a traceability need shows up later — an untagged test needs no ID
+either.
 
 Every `test()` carries a `{ tag: "@FR-..." }` (or an array of tags) mapping
 it to the functional requirement(s) it proves — see
@@ -420,6 +449,13 @@ out anything with no covering test (or only a `fixme`d one) in a dedicated
 gaps document (`REQUIREMENT_GAPS.md` in this project). Re-run this check
 whenever requirements or tests change, not just once — it's what catches a
 requirement that quietly stopped being proven.
+
+The drift can run the other way too: a test tagged with an ID that isn't a
+key in `FUNCTIONAL_REQUIREMENTS.md` at all. Don't invent an entry just to
+make the tag resolve — treat it the same as an uncovered requirement above,
+a gap to log in `REQUIREMENT_GAPS.md` (or raise with whoever owns the
+requirements doc), not a requirement to author into existence to match a
+test.
 
 ### Feed it into the reporter directly, don't hand-maintain a duplicate map
 
