@@ -184,6 +184,10 @@ await evidenceStep(page, testInfo, 'Confirm the dashboard loads', async () => {
 }, { screenshotScale: 'css' });
 ```
 
+## Test writing conventions
+
+See [`docs/TEST_WRITING_BEST_PRACTICES.md`](docs/TEST_WRITING_BEST_PRACTICES.md) for the full set of conventions — setup vs. evidence steps, tagging, describe grouping, and more — that make a generated report readable as a standalone validation record. It ships with the published package, so it's available at `node_modules/@skyrocket-software/playwright-evidence/docs/TEST_WRITING_BEST_PRACTICES.md` for developers and coding agents working in a consuming project.
+
 ## Generating the evidence PDF on every PR
 
 The PDF can be published as a GitHub Actions artifact so reviewers can download it directly from the PR checks page.

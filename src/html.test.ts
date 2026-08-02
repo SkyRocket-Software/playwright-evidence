@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   badge,
+  collectRequirementFeatures,
   compareNaturalIds,
   compareTestOrder,
+  computeRequirementOrder,
   computeRollupStatus,
   escapeHtml,
   htmlDocument,
@@ -683,6 +685,103 @@ describe('compareTestOrder', () => {
     const second: TestRecord = { ...passingTest, title: 'Runs second', testId: null };
     expect([first, second].sort(compareTestOrder)).toEqual([first, second]);
   });
+
+  it('ranks a test by its lowest-ranked requirement ahead of test-id order', () => {
+    const requirementRank = new Map([['FR-LOGIN-1', 0], ['FR-CHECKOUT-1', 1]]);
+    // Test-id order alone would put provesCheckout first; the requirement rank should win instead.
+    const provesCheckout: TestRecord = { ...passingTest, testId: 'TC-A-1', requirements: [{ id: 'FR-CHECKOUT-1', description: '', features: [] }] };
+    const provesLogin: TestRecord = { ...passingTest, testId: 'TC-Z-1', requirements: [{ id: 'FR-LOGIN-1', description: '', features: [] }] };
+    expect([provesCheckout, provesLogin].sort((a, b) => compareTestOrder(a, b, requirementRank))).toEqual([provesLogin, provesCheckout]);
+  });
+
+  it('ranks a test proving any requirement ahead of one proving none, even if the latter\'s test-id sorts first', () => {
+    const requirementRank = new Map([['FR-LOGIN-1', 0]]);
+    const provesRequirement: TestRecord = { ...passingTest, testId: 'TC-Z-1', requirements: [{ id: 'FR-LOGIN-1', description: '', features: [] }] };
+    const provesNothing: TestRecord = { ...passingTest, testId: 'TC-A-1' };
+    expect([provesNothing, provesRequirement].sort((a, b) => compareTestOrder(a, b, requirementRank))).toEqual([provesRequirement, provesNothing]);
+  });
+
+  it('falls back to test-id order for two tests tied on requirement rank', () => {
+    const requirementRank = new Map([['FR-LOGIN-1', 0]]);
+    const first: TestRecord = { ...passingTest, testId: 'TC-LOGIN-1', requirements: [{ id: 'FR-LOGIN-1', description: '', features: [] }] };
+    const second: TestRecord = { ...passingTest, testId: 'TC-LOGIN-2', requirements: [{ id: 'FR-LOGIN-1', description: '', features: [] }] };
+    expect([second, first].sort((a, b) => compareTestOrder(a, b, requirementRank))).toEqual([first, second]);
+  });
+});
+
+// ── computeRequirementOrder ──────────────────────────────────────────────────
+
+describe('computeRequirementOrder', () => {
+  it('falls back to natural id order when about is undefined', () => {
+    const features = new Map([['FR-CHANNEL-10', []], ['FR-CHANNEL-2', []]]);
+    expect(computeRequirementOrder(['FR-CHANNEL-10', 'FR-CHANNEL-2'], features, undefined)).toEqual(['FR-CHANNEL-2', 'FR-CHANNEL-10']);
+  });
+
+  it('orders requirements by their feature\'s position in about, ahead of natural id', () => {
+    const about: Record<string, AboutFeature> = {
+      login: { title: 'Logging in', body: '' },
+      checkout: { title: 'Checking out', body: '' },
+    };
+    const features = new Map([
+      ['FR-CHECKOUT-1', ['checkout']],
+      ['FR-LOGIN-1', ['login']],
+    ]);
+    // 'FR-CHECKOUT-1' sorts first naturally, but 'login' is declared before 'checkout' in about.
+    expect(computeRequirementOrder(['FR-CHECKOUT-1', 'FR-LOGIN-1'], features, about)).toEqual(['FR-LOGIN-1', 'FR-CHECKOUT-1']);
+  });
+
+  it('sorts requirements sharing a feature naturally by id', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: '' } };
+    const features = new Map([
+      ['FR-LOGIN-10', ['login']],
+      ['FR-LOGIN-2', ['login']],
+    ]);
+    expect(computeRequirementOrder(['FR-LOGIN-10', 'FR-LOGIN-2'], features, about)).toEqual(['FR-LOGIN-2', 'FR-LOGIN-10']);
+  });
+
+  it('sorts a requirement with no matching feature after every featured requirement', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: '' } };
+    const features = new Map([
+      ['FR-OTHER-1', []],
+      ['FR-LOGIN-1', ['login']],
+    ]);
+    expect(computeRequirementOrder(['FR-OTHER-1', 'FR-LOGIN-1'], features, about)).toEqual(['FR-LOGIN-1', 'FR-OTHER-1']);
+  });
+
+  it('treats a feature id absent from about as unfeatured, rather than erroring', () => {
+    const about: Record<string, AboutFeature> = { login: { title: 'Logging in', body: '' } };
+    const features = new Map([
+      ['FR-GHOST-1', ['not-a-real-feature']],
+      ['FR-LOGIN-1', ['login']],
+    ]);
+    expect(computeRequirementOrder(['FR-GHOST-1', 'FR-LOGIN-1'], features, about)).toEqual(['FR-LOGIN-1', 'FR-GHOST-1']);
+  });
+});
+
+// ── collectRequirementFeatures ───────────────────────────────────────────────
+
+describe('collectRequirementFeatures', () => {
+  it('reads features from an object-form requirements map entry', () => {
+    const result = collectRequirementFeatures([], { 'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] } });
+    expect(result.get('FR-LOGIN-1')).toEqual(['login']);
+  });
+
+  it('defaults a bare string map entry to no features', () => {
+    const result = collectRequirementFeatures([], { 'FR-LOGIN-1': 'Users can log in' });
+    expect(result.get('FR-LOGIN-1')).toEqual([]);
+  });
+
+  it('includes a requirement referenced only by a test\'s tags and missing from the map', () => {
+    const test: TestRecord = { ...passingTest, requirements: [{ id: 'FR-LOGIN-1', description: 'Users can log in', features: ['login'] }] };
+    const result = collectRequirementFeatures([test], undefined);
+    expect(result.get('FR-LOGIN-1')).toEqual(['login']);
+  });
+
+  it('prefers the map\'s features over a test\'s when a requirement id appears in both', () => {
+    const test: TestRecord = { ...passingTest, requirements: [{ id: 'FR-LOGIN-1', description: 'x', features: ['from-test'] }] };
+    const result = collectRequirementFeatures([test], { 'FR-LOGIN-1': { description: 'x', features: ['from-map'] } });
+    expect(result.get('FR-LOGIN-1')).toEqual(['from-map']);
+  });
 });
 
 // ── computeRollupStatus ──────────────────────────────────────────────────────
@@ -1266,6 +1365,77 @@ describe('renderReport', () => {
 
     expect(html.indexOf('Has an id')).toBeLessThan(html.indexOf('No id, ran first'));
     expect(html.indexOf('No id, ran first')).toBeLessThan(html.indexOf('No id, ran second'));
+  });
+
+  describe('feature-first ordering', () => {
+    const about: Record<string, AboutFeature> = {
+      login: { title: 'Logging in', body: 'Users can sign in.' },
+      checkout: { title: 'Checking out', body: 'Users can buy things.' },
+    };
+    const requirements = {
+      'FR-CHECKOUT-1': { description: 'Users can check out', features: ['checkout'] },
+      'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] },
+    };
+
+    it('orders a test by its feature\'s position in about, ahead of its own test-id', () => {
+      // Test-id order alone (TC-A-1 before TC-Z-9) would put checkoutTest first;
+      // 'login' is declared before 'checkout' in `about`, so loginTest should win instead.
+      const checkoutTest: TestRecord = {
+        ...passingTest,
+        title: 'Checkout works',
+        testId: 'TC-A-1',
+        requirements: [{ id: 'FR-CHECKOUT-1', description: 'Users can check out', features: ['checkout'] }],
+      };
+      const loginTest: TestRecord = {
+        ...passingTest,
+        title: 'Login works',
+        testId: 'TC-Z-9',
+        requirements: [{ id: 'FR-LOGIN-1', description: 'Users can log in', features: ['login'] }],
+      };
+      const html = renderReport('R', [checkoutTest, loginTest], new Date(), requirements, about);
+      expect(html.indexOf('<h2>Login works</h2>')).toBeLessThan(html.indexOf('<h2>Checkout works</h2>'));
+    });
+
+    it('orders the Traceability Matrix rows the same way as the tests that prove them', () => {
+      const html = renderReport('R', [], new Date(), requirements, about);
+      expect(html.indexOf('id="requirement-FR-LOGIN-1"')).toBeLessThan(html.indexOf('id="requirement-FR-CHECKOUT-1"'));
+    });
+
+    it('ranks a test proving any requirement ahead of one proving none, even if the latter\'s test-id sorts first', () => {
+      const provesRequirement: TestRecord = {
+        ...passingTest,
+        title: 'Proves a requirement',
+        testId: 'TC-Z-1',
+        requirements: [{ id: 'FR-LOGIN-1', description: 'Users can log in', features: ['login'] }],
+      };
+      const provesNothing: TestRecord = { ...passingTest, title: 'Proves nothing', testId: 'TC-A-1' };
+      const html = renderReport('R', [provesNothing, provesRequirement], new Date(), requirements, about);
+      expect(html.indexOf('<h2>Proves a requirement</h2>')).toBeLessThan(html.indexOf('<h2>Proves nothing</h2>'));
+    });
+
+    it('falls back to test-id order for two tests tied on the same requirement rank', () => {
+      const second: TestRecord = {
+        ...passingTest,
+        title: 'Runs second',
+        testId: 'TC-LOGIN-2',
+        requirements: [{ id: 'FR-LOGIN-1', description: 'Users can log in', features: ['login'] }],
+      };
+      const first: TestRecord = {
+        ...passingTest,
+        title: 'Runs first',
+        testId: 'TC-LOGIN-1',
+        requirements: [{ id: 'FR-LOGIN-1', description: 'Users can log in', features: ['login'] }],
+      };
+      const html = renderReport('R', [second, first], new Date(), requirements, about);
+      expect(html.indexOf('<h2>Runs first</h2>')).toBeLessThan(html.indexOf('<h2>Runs second</h2>'));
+    });
+
+    it('is unaffected when requirements/about are omitted — falls back to plain test-id order', () => {
+      const testC: TestRecord = { ...passingTest, title: 'Runs third', testId: 'TC-LOGIN-10' };
+      const testA: TestRecord = { ...passingTest, title: 'Runs first', testId: 'TC-LOGIN-1' };
+      const html = renderReport('R', [testC, testA], new Date());
+      expect(html.indexOf('<h2>Runs first</h2>')).toBeLessThan(html.indexOf('<h2>Runs third</h2>'));
+    });
   });
 
   describe('about', () => {
