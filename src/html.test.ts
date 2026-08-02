@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { upperFirst } from 'lodash-es';
 import {
   badge,
   collectRequirementFeatures,
@@ -1303,14 +1304,15 @@ describe('renderReport', () => {
     expect(html).not.toContain('Requirements Traceability Matrix');
   });
 
-  it('renders the table of contents, then the traceability matrix, then the test case index', () => {
+  it('renders the table of contents, then the traceability matrix, then the test sections, then the test case index last', () => {
     const html = renderReport('R', [passingTest], new Date(), { 'FR-LOGIN-1': 'Users can log in' });
     expect(html).toContain('<h2>Requirements Traceability Matrix</h2>');
     expect(html.indexOf('<h2>Table of Contents</h2>')).toBeLessThan(html.indexOf('<h2>Requirements Traceability Matrix</h2>'));
-    expect(html.indexOf('<h2>Requirements Traceability Matrix</h2>')).toBeLessThan(html.indexOf('<h2>Test Case Index</h2>'));
+    expect(html.indexOf('<h2>Requirements Traceability Matrix</h2>')).toBeLessThan(html.indexOf(`<h2>${upperFirst(passingTest.title)}</h2>`));
+    expect(html.indexOf(`<h2>${upperFirst(passingTest.title)}</h2>`)).toBeLessThan(html.indexOf('<h2>Test Case Index</h2>'));
   });
 
-  it('does not render a standalone Test Results heading — individual tests follow the index directly', () => {
+  it('does not render a standalone Test Results heading — the Table of Contents links straight to the first test', () => {
     const html = renderReport('R', [passingTest], new Date());
     expect(html).not.toContain('<h2>Test Results</h2>');
   });
@@ -1342,8 +1344,11 @@ describe('renderReport', () => {
     const testB: TestRecord = { ...passingTest, title: 'Runs second', testId: 'TC-LOGIN-2' };
     const html = renderReport('R', [testC, testA, testB], new Date());
 
-    // Test Case Index rows read top-to-bottom in id order.
-    const indexSection = html.slice(html.indexOf('Test Case Index'), html.indexOf('id="test-1"'));
+    // Test Case Index rows read top-to-bottom in id order. The index is
+    // rendered after every test section, so its content starts at the last
+    // occurrence of the heading rather than the first (each test title is
+    // also mentioned once per index row).
+    const indexSection = html.slice(html.lastIndexOf('Test Case Index'));
     expect(indexSection.indexOf('TC-LOGIN-1')).toBeLessThan(indexSection.indexOf('TC-LOGIN-2'));
     expect(indexSection.indexOf('TC-LOGIN-2')).toBeLessThan(indexSection.indexOf('TC-LOGIN-10'));
 

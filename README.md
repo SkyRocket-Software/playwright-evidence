@@ -184,6 +184,55 @@ await evidenceStep(page, testInfo, 'Confirm the dashboard loads', async () => {
 }, { screenshotScale: 'css' });
 ```
 
+Leave this at the default unless you have a specific reason to override it — most projects never need to.
+
+### Full example
+
+A complete spec file, wrapped in one top-level `test.describe` per the convention above:
+
+```ts
+// tests/home.spec.ts
+import { expect } from '@playwright/test';
+import { test } from '@playwright/test';
+import { setupStep, evidenceStep } from '@skyrocket-software/playwright-evidence';
+
+test.describe('The homepage', () => {
+  test('page title reads "My App"', async ({ page }, testInfo) => {
+    await setupStep('Given the website is open', async () => {
+      await page.goto('/');
+    });
+
+    await evidenceStep(page, testInfo, 'Confirm the page title reads "My App"', async () => {
+      await expect(page).toHaveTitle(/My App/);
+    });
+  });
+});
+```
+
+If the project's `playwright.config.ts` passes a `requirements` map to the reporter, tag the test with the requirement it proves and give it a stable ID instead:
+
+```ts
+// tests/home.spec.ts
+import { expect } from '@playwright/test';
+import { test } from '@playwright/test';
+import { setupStep, evidenceStep } from '@skyrocket-software/playwright-evidence';
+
+test('page title reads "My App"', {
+  tag: '@FR-TITLE-1',
+  annotation: { type: 'test-id', description: 'TC-TITLE-1' },
+}, async ({ page }, testInfo) => {
+  await setupStep('Given the website is open', async () => {
+    await page.goto('/');
+  });
+
+  await evidenceStep(page, testInfo, 'Confirm the page title reads "My App"', async () => {
+    await expect(page).toHaveTitle(/My App/);
+  });
+});
+```
+
+Omit the `tag` and `annotation` entirely for a project with no `requirements` map configured — don't add them speculatively.
+
 ## Test writing conventions
 
 See [`docs/TEST_WRITING_BEST_PRACTICES.md`](docs/TEST_WRITING_BEST_PRACTICES.md) for the full set of conventions — setup vs. evidence steps, tagging, describe grouping, and more — that make a generated report readable as a standalone validation record. It ships with the published package, so it's available at `node_modules/@skyrocket-software/playwright-evidence/docs/TEST_WRITING_BEST_PRACTICES.md` for developers and coding agents working in a consuming project.
@@ -254,12 +303,12 @@ Add the two steps — `Install Playwright browsers` and `Upload evidence report`
 - Cover page with overall PASS/FAIL/FLAKY status and test count
 - Table of Contents linking to the Requirements Traceability Matrix (if `requirements` is set) and every test
 - Requirements Traceability Matrix listing each requirement, its covering test(s), and a rolled-up PASS/FAIL/SKIPPED/MISSED/FLAKY status (if `requirements` is set)
-- Test Case Index listing every test's ID (if annotated), title, and result — sorted by test-id, with any test that has no test-id following after, in run order
 - One section per test with a step table, headed by its `test-id` (if annotated), its enclosing `test.describe` title (if any), and the requirement(s) it proves (if tagged)
 - Setup steps rendered as muted/italic rows with no badge
 - Evidence steps rendered with PASS/FAIL badge and an embedded screenshot
 - A test that only passed after a retry is marked FLAKY rather than PASS
 - Error output shown inline for failing tests
+- Test Case Index listing every test's ID (if annotated), title, and result, at the end of the report — sorted by test-id, with any test that has no test-id following after, in run order
 - In PDF mode, every page reference (Table of Contents, Test Case Index, Traceability Matrix) is a real, resolved page number and a clickable link to its target
 - PDF includes page headers (report title, run date) and footers (page X of Y)
 - Print-friendly CSS included

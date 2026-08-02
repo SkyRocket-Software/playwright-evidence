@@ -565,7 +565,7 @@ export function renderTestCaseIndex(tests: TestRecord[], pageNumbers: PageNumber
   }).join('\n');
 
   return `
-    <div class="section toc" id="test-case-index" style="page-break-after:always;">
+    <div class="section toc" id="test-case-index">
       ${pageMarker('test-case-index', pageNumbers)}
       <div class="section-header">
         <h2>Test Case Index</h2>
@@ -599,10 +599,10 @@ export function renderTableOfContents(
       ? `<tr><td><a href="#requirements-matrix">Requirements Traceability Matrix</a></td>${pageCell('requirements-matrix', pageNumbers)}</tr>`
       : '',
     hasTests
-      ? `<tr><td><a href="#test-case-index">Test Case Index</a></td>${pageCell('test-case-index', pageNumbers)}</tr>`
+      ? `<tr><td><a href="#test-1">Test Results</a></td>${pageCell('test-1', pageNumbers)}</tr>`
       : '',
     hasTests
-      ? `<tr><td><a href="#test-1">Test Results</a></td>${pageCell('test-1', pageNumbers)}</tr>`
+      ? `<tr><td><a href="#test-case-index">Test Case Index</a></td>${pageCell('test-case-index', pageNumbers)}</tr>`
       : '',
   ]).join('\n');
 
@@ -951,6 +951,9 @@ export function renderReport(
   const matrix = renderTraceabilityMatrix(orderedTests, requirementsMap, about, pageNumbers);
   const index = renderTestCaseIndex(orderedTests, pageNumbers);
   const tableOfContents = renderTableOfContents(matrix !== '', orderedTests.length > 0, firstAboutFeatureId, pageNumbers);
+  // Test Case Index renders last, not up front with the Table of Contents/
+  // Matrix — it's a navigation aid, not primary content, so it shouldn't
+  // bloat the front of the report ahead of the tests it indexes.
   const testSections = orderedTests
     .map((t, i) => renderTest(t, i + 1, pageNumbers))
     .join('\n');
@@ -970,8 +973,8 @@ export function renderReport(
     ${tableOfContents}
     ${aboutSection}
     ${matrix}
-    ${index}
     ${testSections}
+    ${index}
   </div>
 `);
 }
