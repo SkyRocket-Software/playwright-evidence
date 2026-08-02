@@ -7,16 +7,16 @@ import type {
   TestStep,
 } from '@playwright/test/reporter';
 import fs from 'fs';
+import { escape, uniq } from 'lodash-es';
 import os from 'os';
 import path from 'path';
-import { escapeHtml, normalizeRequirementInput, renderReport } from './html.ts';
+import { normalizeRequirementInput, renderReport } from './html.ts';
 import type { AboutFeature, RequirementInput, RequirementRecord, StepRecord, TestRecord } from './html.ts';
 
 /**
- * Formats a date (in UTC) as a filesystem-safe, sortable timestamp (YYYYMMDD-HHmmssZ)
- * for use in output filenames. Uses UTC rather than local time so a DST transition
- * can't produce the same wall-clock time twice for two genuinely different instants.
- * The trailing `Z` marks the timestamp as UTC so it isn't misread as local time.
+ * Formats a UTC date as a filesystem-safe, sortable timestamp (YYYYMMDD-HHmmssZ)
+ * for output filenames. UTC avoids a DST transition producing the same
+ * wall-clock time twice; the trailing `Z` marks it as UTC.
  */
 export function formatTimestamp(date: Date): string {
   const pad = (value: number): string => String(value).padStart(2, '0');
@@ -25,11 +25,7 @@ export function formatTimestamp(date: Date): string {
   return `${datePart}-${timePart}Z`;
 }
 
-/**
- * Short random suffix so filenames stay unique even when two runs resolve their
- * output path within the same second (e.g. parallel CI shards) — the timestamp
- * alone only has one-second resolution and can't disambiguate those on its own.
- */
+/** Short random suffix so filenames stay unique even when two runs resolve within the same second (e.g. parallel CI shards). */
 function randomSuffix(): string {
   return Math.floor(Math.random() * 36 ** 6).toString(36).padStart(6, '0');
 }
@@ -120,12 +116,10 @@ interface EvidenceReporterOptions {
  */
 export default class EvidenceReporter implements Reporter {
   /**
-   * Keyed by the TestCase object rather than a push-only array. Playwright
-   * calls onTestEnd once per attempt when retries are configured, passing the
-   * same TestCase reference each time — keying on it means a later retry's
-   * record replaces the earlier attempt's instead of appending a duplicate
-   * section for the same test, while still tracking rendering order (Map
-   * preserves insertion order; re-setting an existing key doesn't move it).
+   * Keyed by TestCase, not a push-only array — onTestEnd fires once per retry
+   * attempt with the same TestCase reference, so keying on it lets a later
+   * retry replace the earlier attempt instead of duplicating a section, while
+   * Map preserves insertion order for rendering.
    */
   private testRecords = new Map<TestCase, TestRecord>();
   private startTime!: Date;
@@ -178,13 +172,10 @@ export default class EvidenceReporter implements Reporter {
   }
 
   /**
-   * Maps a single attempt's raw result to this report's status vocabulary. A
-   * test that only passed because Playwright retried it (`result.retry > 0`)
-   * is reported as 'flaky' rather than a plain 'pass', so a reviewer can tell
-   * a clean first-try pass from one that needed a second attempt. Since
-   * onTestEnd fires once per attempt and only the latest attempt's record is
-   * kept (see the `testRecords` field), this only needs to reflect the
-   * attempt it's given, not the test's full retry history.
+   * Maps a single attempt's result to this report's status vocabulary. A test
+   * that only passed on retry (`result.retry > 0`) reports as 'flaky', not a
+   * plain 'pass', so a reviewer can tell a clean pass from one that needed a
+   * second attempt.
    */
   private deriveStatus(result: TestResult): TestRecord['status'] {
     if (result.status === 'skipped') return 'skipped';
@@ -193,34 +184,18 @@ export default class EvidenceReporter implements Reporter {
   }
 
   /**
-   * Matches this test's tags (with any leading "@" stripped) against the
-   * `requirements` option map, returning the subset that has a known
-   * requirement description. Tags with no matching map entry are ignored —
-   * not every tag is necessarily a requirement ID. A duplicated tag (e.g. a
-   * copy-paste mistake) yields one entry, not a repeated one.
+   * Matches this test's tags (leading "@" stripped) against the `requirements`
+   * map, keeping only tags with a known entry, deduped.
    */
   private deriveRequirements(test: TestCase): RequirementRecord[] {
     const map = this.options.requirements ?? {};
-    const seenIds = new Set<string>();
-    const result: RequirementRecord[] = [];
-
-    for (const tag of test.tags) {
-      const id = tag.startsWith('@') ? tag.slice(1) : tag;
-      if (map[id] && !seenIds.has(id)) {
-        seenIds.add(id);
-        result.push({ id, ...normalizeRequirementInput(map[id]) });
-      }
-    }
-
-    return result;
+    const ids = uniq(test.tags.map((tag) => (tag.startsWith('@') ? tag.slice(1) : tag)).filter((id) => map[id]));
+    return ids.map((id) => ({ id, ...normalizeRequirementInput(map[id]) }));
   }
 
   /**
-   * Reads a test's stable identifier from a `{ type: 'test-id', description: '...' }`
-   * annotation, rather than a tag — tags are for `--grep` filtering (and, here,
-   * requirement matching); annotations are Playwright's mechanism for attaching
-   * arbitrary metadata, which fits an identifier meant only for display and
-   * cross-referencing, not filtering. Returns null when the test has none.
+   * Reads a test's stable id from a `type: 'test-id'` annotation, not a tag —
+   * tags are reserved for `--grep` and requirement matching. Null if absent.
    */
   private deriveTestId(test: TestCase): string | null {
     const annotation = test.annotations.find((a) => a.type === 'test-id');
@@ -228,13 +203,9 @@ export default class EvidenceReporter implements Reporter {
   }
 
   /**
-   * Walks the chain of enclosing `test.describe(...)` suites (outermost
-   * first), joining their titles into one label. Suites form a strict
-   * `root -> project -> file -> describe -> ... -> describe -> test`
-   * hierarchy (`Suite.type`), so stopping as soon as a suite isn't a
-   * 'describe' naturally excludes the file, project, and root suites —
-   * only author-written describe titles end up in the label. Returns null
-   * when the test has no enclosing describe block at all.
+   * Joins the titles of enclosing `test.describe(...)` suites, outermost
+   * first. Stops at the first non-'describe' suite, which naturally excludes
+   * the file/project/root suites. Null if there's no enclosing describe block.
    */
   private deriveDescribeTitle(test: TestCase): string | null {
     const titles: string[] = [];
@@ -253,10 +224,9 @@ export default class EvidenceReporter implements Reporter {
   ): void {
     const status = step.error ? 'fail' : 'pass';
 
-    // Consume the matched attachment (rather than just reading it) so two
-    // steps sharing the same title — a copy-paste mistake, or steps generated
-    // in a loop — pair with successive attachments in encounter order instead
-    // of both silently attaching the first one's screenshot.
+    // Consumes the matched attachment so two steps sharing a title (e.g. a
+    // loop) pair with successive attachments in order, instead of both
+    // grabbing the first.
     const matchIndex = attachments.findIndex((a) => a.name === step.title);
     const match = matchIndex === -1 ? undefined : attachments.splice(matchIndex, 1)[0];
     let screenshotBase64: string | null = null;
@@ -307,21 +277,15 @@ export default class EvidenceReporter implements Reporter {
   }
 
   /**
-   * PDF mode: renders HTML with sidecar screenshot references into the temp
-   * directory, prints to PDF via headless Chromium, then removes the entire
-   * temp directory (HTML + screenshots). Only the PDF is written to the output dir.
+   * Renders HTML with sidecar screenshot paths, prints to PDF via headless
+   * Chromium, then deletes the temp directory. Only the PDF reaches the
+   * output dir.
    *
-   * Real page numbers (for the Table of Contents, Test Case Index, and the
-   * Traceability Matrix's per-test page references) aren't knowable until
-   * Chromium has actually paginated the content once, so this prints twice:
-   *   1. A throwaway "draft" PDF with placeholder page-number reservations
-   *      and invisible `[[page:ID]]` markers, purely to discover — by reading
-   *      it back with pdfjs-dist — which page each marker landed on.
-   *   2. The final PDF, re-rendered with those resolved page numbers
-   *      substituted into the same reserved space so the layout (and thus
-   *      the page numbers themselves) doesn't shift between passes.
-   * Both passes share a single browser launch — launching Chromium is
-   * expensive enough that doing it twice per PDF would be wasteful.
+   * Real page numbers aren't knowable until Chromium paginates once, so this
+   * prints twice: pass 1 with placeholder reservations and invisible
+   * `[[page:ID]]` markers (resolved via pdfjs-dist), pass 2 with those
+   * numbers substituted into the same reserved space so layout doesn't shift.
+   * Both passes share one browser launch.
    */
   private async generatePdf(title: string): Promise<void> {
     const pdfPath = this.resolveOutFile('pdf');
@@ -354,11 +318,9 @@ export default class EvidenceReporter implements Reporter {
   }
 
   /**
-   * Reads the draft PDF back with pdfjs-dist and locates the invisible
-   * `[[page:ID]]` markers `pageMarker()` (in html.ts) embeds at each
-   * linkable section — the draft's only purpose. Returns a map of marker id
-   * to its 1-based page number; a marker that's somehow not found (it always
-   * should be) is simply absent from the map, and callers render nothing
+   * Reads the draft PDF with pdfjs-dist and maps each invisible
+   * `[[page:ID]]` marker (see `pageMarker` in html.ts) to its 1-based page
+   * number. A marker not found is simply absent — callers render nothing
    * rather than a wrong number.
    */
   private async resolvePageNumbers(pdfPath: string): Promise<Map<string, number>> {
@@ -416,8 +378,8 @@ export default class EvidenceReporter implements Reporter {
       <div style="width:100%;padding:0 15mm;display:flex;justify-content:space-between;
                   align-items:center;font-family:Georgia,serif;font-size:9px;color:#555;
                   border-bottom:1px solid #ddd;">
-        <span>${escapeHtml(title)}</span>
-        <span>${escapeHtml(dateStr)}</span>
+        <span>${escape(title)}</span>
+        <span>${escape(dateStr)}</span>
       </div>`;
 
     const footerTemplate = `
@@ -446,11 +408,9 @@ export default class EvidenceReporter implements Reporter {
   }
 
   /**
-   * Resolves the output file path for a given extension, honouring the `file`
-   * option (defaulting to 'evidence-report.<ext>'). Unless `latest` is set,
-   * always appends a run timestamp plus a random suffix before the extension
-   * so repeated runs — even concurrent ones started within the same second —
-   * don't overwrite each other.
+   * Resolves the output path, honouring `file` (default `evidence-report.<ext>`).
+   * Unless `latest` is set, appends a run timestamp + random suffix so
+   * concurrent runs never overwrite each other.
    */
   private resolveOutFile(ext: 'html' | 'pdf'): string {
     const rawFile = this.options.file ?? `evidence-report.${ext}`;

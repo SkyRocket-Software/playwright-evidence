@@ -5,17 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Playwright mock ───────────────────────────────────────────────────────────
 //
-// We mock 'playwright' so we can test PDF wiring without launching a real browser.
-// The mock captures what path page.pdf() was called with, and — since the file
-// still exists on disk at call-time, before generatePdf's later cleanup — reads
-// back whichever HTML was just loaded, so tests can assert on the actual
-// rendered content of either print pass without needing a real Chromium.
+// Mocks 'playwright' so PDF wiring can be tested without a real browser. Reads
+// back whichever HTML mockGoto just loaded, so tests can assert on the actual
+// rendered content of either print pass.
 const loadedHtmlByCall: string[] = [];
 
-// Writes a dummy file at the requested path — resolvePageNumbers reads the
-// draft PDF back off disk before ever touching pdfjs-dist, so the file needs
-// to exist even though its contents are irrelevant (getDocument is mocked
-// too, below, and never actually parses these bytes).
+// Writes a dummy file — resolvePageNumbers reads the draft PDF back off disk
+// before pdfjs-dist (also mocked, below) ever parses it, so the file just needs to exist.
 const mockPdf = vi.fn(async (opts: { path: string; [key: string]: unknown }) => {
   fs.writeFileSync(opts.path, 'fake-pdf-bytes');
 });
@@ -34,13 +30,9 @@ vi.mock('playwright-core', () => ({
 
 // ── pdfjs-dist mock ────────────────────────────────────────────────────────────
 //
-// generatePdf reads its own draft PDF back with pdfjs-dist to resolve page
-// numbers. Real Chromium never runs in these tests, so the "draft PDF" is
-// just whatever mockPdf.mockImplementation left on disk (nothing, by
-// default) — mocking pdfjs-dist too avoids needing a byte-real PDF fixture.
-// Defaults to a zero-page document (no markers resolved); the dedicated
-// "page numbers" tests below override `mockDocument`/`mockGetPage` to
-// exercise real marker-to-page resolution.
+// Avoids needing a byte-real PDF fixture. Defaults to a zero-page document (no
+// markers resolved); the "page numbers" tests below override
+// `mockDocument`/`mockGetPage` to exercise real marker-to-page resolution.
 const mockDocument: { numPages: number } = { numPages: 0 };
 const mockGetPage = vi.fn();
 const mockLoadingTaskDestroy = vi.fn().mockResolvedValue(undefined);

@@ -3,7 +3,7 @@ dist
 package-lock.json
 .pnpm-store/
 coverage/
-e2e-output/
+e2e-output/*.pdf
 test-results/
 playwright-report/
 evidence-report*.html
