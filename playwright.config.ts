@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 interface Content {
   title: string;
   overview: string;
-  about: Record<string, { title: string; body: string }>;
+  features: Record<string, { title: string; body: string }>;
   requirements: Record<string, string | { description: string; features?: string[] }>;
 }
 
@@ -45,7 +45,7 @@ export default defineConfig({
         // requirement, and — since it's the only requirement under the
         // "pricing" feature — an About section also showing MISSED.
         requirements: content.requirements,
-        about: content.about,
+        features: content.features,
       },
     ],
   ],

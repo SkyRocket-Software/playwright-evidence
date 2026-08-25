@@ -7,6 +7,9 @@
     ".": "./dist/index.js",
     "./reporter": "./dist/reporter.js"
   },
+  "bin": {
+    "playwright-evidence-generate": "./dist/generate-cli.js"
+  },
   "scripts": {
     "build": "tsup",
     "prepare": "tsup",

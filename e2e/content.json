@@ -1,7 +1,7 @@
 {
   "title": "Skyrocket POC Evidence",
   "overview": "This is the marketing homepage for **Skyrocket**, a fictional product-launch platform. It introduces the product to a visitor, communicates its value proposition, and gives them a way to get started, explore pricing, or get in touch.\n\nThe requirements below trace each of those visitor-facing claims to the tests that prove them.",
-  "about": {
+  "features": {
     "hero": {
       "title": "The hero section",
       "body": "The hero section is the first thing a visitor sees when they land on the page. It introduces **Skyrocket** by name, states the core promise in one sentence, and gives the visitor an immediate next step.\n\nThe **Get started free** button is the primary call to action — it should always be visible without scrolling and should link straight into the signup flow."
