@@ -776,7 +776,7 @@ describe('EvidenceReporter', () => {
           'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] },
           'FR-OTHER-1': 'Some other requirement',
         },
-        about: { login: { title: 'Logging in', body: 'Some prose.' } },
+        features: { login: { title: 'Logging in', body: 'Some prose.' } },
       });
       reporter.onBegin({} as never, {} as never);
       reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'], annotations: [] } as never, passingResult);
@@ -816,7 +816,7 @@ describe('EvidenceReporter', () => {
       const reporter = new EvidenceReporter({
         file: path.join(tmpDir, 'report.html'),
         requirements: { 'FR-LOGIN-1': { description: 'Users can log in', features: ['login'] } },
-        about: { login: { title: 'Logging in', body: 'Some prose.' } },
+        features: { login: { title: 'Logging in', body: 'Some prose.' } },
       });
       reporter.onBegin({} as never, {} as never);
       reporter.onTestEnd({ title: 'Login test', tags: ['@FR-LOGIN-1'], annotations: [] } as never, passingResult);
@@ -830,7 +830,7 @@ describe('EvidenceReporter', () => {
     it('lists About in the Table of Contents, linked to the first feature', async () => {
       const reporter = new EvidenceReporter({
         file: path.join(tmpDir, 'report.html'),
-        about: { login: { title: 'Logging in', body: 'Some prose.' } },
+        features: { login: { title: 'Logging in', body: 'Some prose.' } },
       });
       reporter.onBegin({} as never, {} as never);
       await reporter.onEnd(fullResult);

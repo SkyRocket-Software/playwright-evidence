@@ -88,14 +88,23 @@ interface EvidenceReporterOptions {
    * with no requirements pointing to it (or none of those covered yet) renders
    * missed, the same way an uncovered requirement does in the Traceability
    * Matrix. Default: undefined (no About section is rendered).
+   *
+   * @deprecated Use `features` instead — kept for backward compatibility.
+   * Ignored when `features` is also set.
    */
   about?: Record<string, AboutFeature>;
   /**
+   * Same shape and behavior as `about`. Takes precedence over `about` when
+   * both are set. Named to match the `features` field `about.json` (see
+   * `src/generate.ts`) is generated with.
+   */
+  features?: Record<string, AboutFeature>;
+  /**
    * Markdown description of the application as a whole, rendered on the cover
    * page itself (between the run date and the pass/fail summary) — distinct
-   * from `about`, which describes individual features one page each. Same
-   * rendering as an `about` body: raw HTML in the source is escaped, not
-   * passed through. Default: undefined (no overview is rendered).
+   * from `about`/`features`, which describe individual features one page
+   * each. Same rendering as a feature body: raw HTML in the source is
+   * escaped, not passed through. Default: undefined (no overview is rendered).
    */
   overview?: string;
 }
@@ -134,6 +143,11 @@ export default class EvidenceReporter implements Reporter {
 
   private get tests(): TestRecord[] {
     return Array.from(this.testRecords.values());
+  }
+
+  /** `features` takes precedence over the deprecated `about` alias when both are set. */
+  private get features(): Record<string, AboutFeature> | undefined {
+    return this.options.features ?? this.options.about;
   }
 
   onBegin(_config: unknown, _suite: Suite): void {
@@ -269,7 +283,7 @@ export default class EvidenceReporter implements Reporter {
   }
 
   private generateHtml(title: string): void {
-    const html = renderReport(title, this.tests, this.startTime, this.options.requirements, this.options.about, this.options.overview);
+    const html = renderReport(title, this.tests, this.startTime, this.options.requirements, this.features, this.options.overview);
     const outPath = this.resolveOutFile('html');
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, html, 'utf8');
@@ -295,7 +309,7 @@ export default class EvidenceReporter implements Reporter {
     const { chromium } = await import('playwright-core');
     const browser = await chromium.launch();
     try {
-      const draftHtml = renderReport(title, this.tests, this.startTime, this.options.requirements, this.options.about, this.options.overview, 'reserve');
+      const draftHtml = renderReport(title, this.tests, this.startTime, this.options.requirements, this.features, this.options.overview, 'reserve');
       const draftHtmlPath = path.join(this.screenshotDir, 'report-draft.html');
       fs.writeFileSync(draftHtmlPath, draftHtml, 'utf8');
       const draftPdfPath = path.join(this.screenshotDir, 'report-draft.pdf');
@@ -303,7 +317,7 @@ export default class EvidenceReporter implements Reporter {
 
       const pageNumbers = await this.resolvePageNumbers(draftPdfPath);
 
-      const finalHtml = renderReport(title, this.tests, this.startTime, this.options.requirements, this.options.about, this.options.overview, pageNumbers);
+      const finalHtml = renderReport(title, this.tests, this.startTime, this.options.requirements, this.features, this.options.overview, pageNumbers);
       const finalHtmlPath = path.join(this.screenshotDir, 'report.html');
       fs.writeFileSync(finalHtmlPath, finalHtml, 'utf8');
       await this.printPdf(browser, finalHtmlPath, pdfPath, title, this.startTime);
