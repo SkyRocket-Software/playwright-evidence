@@ -243,11 +243,11 @@ export function runCli(argv: string[], cwd: string): CliResult {
 
   try {
     ({
-      values: { checkOnly, requirementsFile, aboutFile, outputDir },
+      values: { 'check-only': checkOnly, requirementsFile, aboutFile, outputDir },
     } = parseArgs({
       args: argv,
       options: {
-        checkOnly: { type: "boolean" },
+        'check-only': { type: "boolean" },
         requirementsFile: { type: "string", default: DEFAULT_REQUIREMENTS_FILE },
         aboutFile: { type: "string", default: DEFAULT_ABOUT_FILE },
         outputDir: { type: "string", default: DEFAULT_OUTPUT_DIR },

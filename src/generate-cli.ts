@@ -3,7 +3,7 @@
 import { runCli } from './generate.ts';
 
 // process.argv[0] is node, [1] is this script's path — slice(2) leaves just the flags,
-// e.g. ['--write'] for `playwright-evidence-generate --write`.
+// e.g. ['--check-only'] for `playwright-evidence-generate --check-only`.
 const { exitCode, messages } = runCli(process.argv.slice(2), process.cwd());
 
 for (const message of messages) {

@@ -450,7 +450,7 @@ describe('runCli', () => {
       expect(fs.existsSync(path.join(tmpDir, 'generated/about.json'))).toBe(true);
     });
 
-    it('writes generated files when --checkOnly is not passed', () => {
+    it('writes generated files when --check-only is not passed', () => {
       writeSource(
         'docs/FUNCTIONAL_REQUIREMENTS.md',
         '## FEAT-SCHEDULING\n\n### FR-SCHEDULING-1\n\nA requirement.\n',
@@ -471,14 +471,14 @@ describe('runCli', () => {
       );
       writeSource('docs/ABOUT.md', '# App\n\nOverview.\n\n## FEAT-SCHEDULING: Scheduling\n\nBody.\n');
 
-      const result = runCli(['--checkOnly'], tmpDir);
+      const result = runCli(['--check-only'], tmpDir);
 
       expect(result).toEqual({ exitCode: 0, messages: [] });
       expect(fs.existsSync(path.join(tmpDir, 'e2e'))).toBe(false);
     });
 
     it('reports no problems, without failing, when neither default source document exists', () => {
-      const result = runCli(['--checkOnly'], tmpDir);
+      const result = runCli(['--check-only'], tmpDir);
 
       expect(result).toEqual({ exitCode: 0, messages: [] });
     });
@@ -486,7 +486,7 @@ describe('runCli', () => {
     it('reports a parse error for a malformed document instead of throwing', () => {
       writeSource('docs/FUNCTIONAL_REQUIREMENTS.md', '## Not a feature heading\n');
 
-      const result = runCli(['--checkOnly'], tmpDir);
+      const result = runCli(['--check-only'], tmpDir);
 
       expect(result.exitCode).toBe(1);
       expect(result.messages).toEqual([expect.stringMatching(/FEAT-/)]);
@@ -496,7 +496,7 @@ describe('runCli', () => {
       writeSource('docs/FUNCTIONAL_REQUIREMENTS.md', '## Not a feature heading\n');
       writeSource('docs/ABOUT.md', '## FEAT-SCHEDULING: Scheduling\n\nBody.\n');
 
-      const result = runCli(['--checkOnly'], tmpDir);
+      const result = runCli(['--check-only'], tmpDir);
 
       expect(result.exitCode).toBe(1);
       expect(result.messages).toEqual([
@@ -506,7 +506,7 @@ describe('runCli', () => {
     });
 
     it('treats a source document at a custom path that does not exist as a hard error', () => {
-      const result = runCli(['--checkOnly', '--aboutFile', 'about.md'], tmpDir);
+      const result = runCli(['--check-only', '--aboutFile', 'about.md'], tmpDir);
 
       expect(result.exitCode).toBe(1);
       expect(result.messages).toEqual(['about.md: file not found']);
