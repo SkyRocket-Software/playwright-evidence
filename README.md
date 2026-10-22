@@ -9,26 +9,9 @@ Two output modes:
 
 ## Install
 
-This package is distributed via GitHub Packages. You will need a GitHub personal access token with `read:packages` scope.
+This package is published on the public npm registry — no registry configuration or token required.
 
-### 1. Configure the registry
-
-Add a `.npmrc` file to the root of your project:
-
-```text
-@skyrocket-software:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
-```
-
-Set the `GITHUB_TOKEN` environment variable to your personal access token, or add it to your CI secrets.
-
-For pnpm, the same `.npmrc` format is supported. Alternatively, you can configure it in `.pnpmfile.cjs` or via `pnpm config`:
-
-```bash
-pnpm config set @skyrocket-software:registry https://npm.pkg.github.com
-```
-
-### 2. Install the package
+### Install the package
 
 PNPM -
 
@@ -70,7 +53,9 @@ export default defineConfig({
 | `file` | `evidence-report.html` / `.pdf` | Output filename. A run timestamp plus a short random suffix is always appended before the extension, e.g. `report.pdf` becomes `report-20260724-143005-a1b2c3.pdf`, so repeated runs — including ones that start within the same second — never overwrite each other |
 | `latest` | `false` | When `true`, skips the timestamp/suffix and always writes to the exact `file` path, so each run overwrites the last — useful for a stable "latest" link instead of one file per run |
 | `title` | `'Test Evidence Report'` | Report heading |
-| `requirements` | `undefined` | Maps a functional requirement ID (matched against each test's tags, leading `@` stripped) to its prose description. When set, each test's section lists the requirement(s) it proves, and a Requirements Traceability Matrix section lists every requirement, its covering test(s), and a rolled-up pass/fail/skipped/missed status |
+| `requirements` | `undefined` | Maps a functional requirement ID (matched against each test's tags, leading `@` stripped) to its prose description, or to `{ description, features }` to also declare which `features` entry(ies) the requirement supports. When set, each test's section lists the requirement(s) it proves, and a Requirements Traceability Matrix section lists every requirement, its covering test(s), and a rolled-up pass/fail/skipped/missed status |
+| `features` | `undefined` | Feature ID -> `{ title, body }` map (`body` is Markdown). Adds an About section after the Table of Contents, one shared section per feature, each with a status rolled up from every test proving a requirement that lists the feature |
+| `overview` | `undefined` | Markdown description of the application as a whole, rendered on the cover page between the run date and the pass/fail summary |
 
 #### Flaky tests
 
@@ -78,7 +63,7 @@ If your `playwright.config.ts` sets `retries` (a common CI pattern, e.g. `retrie
 
 #### Supplying `requirements` from a file
 
-`requirements` is a plain `Record<string, string>` — this package has no opinion on where it comes from. A common case is stakeholders (including non-technical ones) maintaining the requirement list outside the codebase, in whatever file format they're comfortable with.
+`requirements` is a `Record<string, string | { description: string; features?: string[] }>` — this package has no opinion on where it comes from. A common case is stakeholders (including non-technical ones) maintaining the requirement list outside the codebase, in whatever file format they're comfortable with.
 
 For example, from JSON:
 
@@ -94,7 +79,7 @@ For example, from JSON:
 // playwright.config.ts
 import fs from 'fs';
 
-const requirements: Record<string, string> = JSON.parse(fs.readFileSync('requirements.json', 'utf8'));
+const requirements = JSON.parse(fs.readFileSync('requirements.json', 'utf8'));
 
 export default defineConfig({
   reporter: [
@@ -103,7 +88,7 @@ export default defineConfig({
 });
 ```
 
-The same pattern works for CSV, YAML, or anything else — read the file and parse it into a `Record<string, string>` before passing it to `requirements`. CSV and YAML both need a parsing library (e.g. `csv-parse`, `yaml`) to handle escaping correctly (quoted fields, embedded commas/colons); JSON needs none, since `JSON.parse` is built in.
+The same pattern works for CSV, YAML, or anything else — read the file and parse it into the `requirements` shape above before passing it in. CSV and YAML both need a parsing library (e.g. `csv-parse`, `yaml`) to handle escaping correctly (quoted fields, embedded commas/colons); JSON needs none, since `JSON.parse` is built in.
 
 #### Tagging a test with the requirement it proves
 
@@ -300,8 +285,9 @@ Add the two steps — `Install Playwright browsers` and `Upload evidence report`
 
 ## Report format
 
-- Cover page with overall PASS/FAIL/FLAKY status and test count
-- Table of Contents linking to the Requirements Traceability Matrix (if `requirements` is set) and every test
+- Cover page with overall PASS/FAIL/FLAKY status and test count, plus the `overview` text (if set)
+- Table of Contents linking to About (if `features` is set), the Requirements Traceability Matrix (if `requirements` is set), the first test, and the Test Case Index
+- About section with one shared section per feature, each with a rolled-up status (if `features` is set)
 - Requirements Traceability Matrix listing each requirement, its covering test(s), and a rolled-up PASS/FAIL/SKIPPED/MISSED/FLAKY status (if `requirements` is set)
 - One section per test with a step table, headed by its `test-id` (if annotated), its enclosing `test.describe` title (if any), and the requirement(s) it proves (if tagged)
 - Setup steps rendered as muted/italic rows with no badge
