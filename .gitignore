@@ -1,10 +1,83 @@
-node_modules
+# --- Build output ---
 dist
+build/
+releases/
+
+# --- Dependencies ---
+node_modules
+jspm_packages
+
+# --- Lockfile ---
+# pnpm-lock.yaml is tracked (it's this project's lockfile); only the npm
+# lockfile is ignored, since this is a pnpm project.
 package-lock.json
+
+# --- Logs ---
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+debug.log
+
+# --- Diagnostic reports (https://nodejs.org/api/report.html) ---
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# --- Runtime data ---
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# --- Test coverage ---
+coverage
+*.lcov
+.nyc_output
+lib-cov
+
+# --- Caches ---
+.npm
+.eslintcache
+.cache
+.parcel-cache
 .pnpm-store/
-coverage/
-e2e-output/*.pdf
+
+# --- Type definitions & TS build cache ---
+typings
+*.tsbuildinfo
+
+# --- Packaged tarballs ---
+*.tgz
+
+# --- Environment variables ---
+.env
+.env.*
+!.env.example
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+
+# --- Framework build output (kept from the standard template; harmless if unused) ---
+.next
+out
+.nuxt
+.vuepress/dist
+.serverless/
+.fusebox/
+.dynamodb/
+.parcel
+.cache/
+node_modules/
+
+# --- Playwright (project-specific) ---
 test-results/
 playwright-report/
+e2e-output/*.pdf
+
+# --- Evidence report output (project-specific) ---
 evidence-report*.html
 evidence-report*.pdf

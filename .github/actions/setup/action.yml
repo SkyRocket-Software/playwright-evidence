@@ -1,0 +1,19 @@
+name: Setup
+description: Install dependencies (shared base for CI jobs; run actions/checkout first, since this action is loaded from the repo)
+runs:
+  using: composite
+  steps:
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v6
+      with:
+        version: 11.5.0
+
+    - name: Setup Node
+      uses: actions/setup-node@v6
+      with:
+        node-version: 24
+        cache: pnpm
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile
