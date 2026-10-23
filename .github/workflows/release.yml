@@ -47,22 +47,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # releases/ is gitignored, so each run starts from an empty dir and
-      # semantic-release writes exactly one tarball. Any tarball present
-      # means a release was cut this run.
-      - name: Check for staged release
-        id: check
-        run: |
-          if ls releases/*.tgz >/dev/null 2>&1; then
-            echo "released=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "released=false" >> "$GITHUB_OUTPUT"
-          fi
 
       # Submits the version to npm's staging area for maintainer review.
       # No 2FA required here; the human approval happens on npmjs.com.
       - name: Stage on npm for review
-        if: steps.check.outputs.released == 'true'
         run: |
           npm config set //registry.npmjs.org/:_authToken "${NPM_TOKEN}"
           npm stage publish ./releases/*.tgz --access public
