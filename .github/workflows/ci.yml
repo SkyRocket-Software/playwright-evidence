@@ -7,14 +7,18 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: ./actions/setup
+      # Local actions are loaded from the repo, so checkout must precede
+      # ./.github/actions/setup in every job.
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
       - name: Lint
         run: pnpm run lint
 
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: ./actions/setup
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
       - name: Typecheck
         run: pnpm run typecheck
       - name: Test
@@ -23,7 +27,8 @@ jobs:
   evidence:
     runs-on: ubuntu-latest
     steps:
-      - uses: ./actions/setup
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
       # Browsers aren't covered by setup-node's pnpm cache, so cache them
       # separately. Keyed on the lockfile hash so a @playwright/test bump
       # re-downloads once.
