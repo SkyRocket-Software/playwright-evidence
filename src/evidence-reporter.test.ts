@@ -358,6 +358,22 @@ describe('EvidenceReporter', () => {
       expect(call.footerTemplate).toContain('class="totalPages"');
     });
 
+    it('shows no footer label by default', async () => {
+      const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf') });
+      reporter.onBegin({} as never, {} as never);
+      await reporter.onEnd(fullResult);
+      const call = mockPdf.mock.calls[0][0];
+      expect(call.footerTemplate).toContain('<span></span>');
+    });
+
+    it('uses the footer option as the footer label when set', async () => {
+      const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf'), footer: 'Acme Corp' });
+      reporter.onBegin({} as never, {} as never);
+      await reporter.onEnd(fullResult);
+      const call = mockPdf.mock.calls[0][0];
+      expect(call.footerTemplate).toContain('<span>Acme Corp</span>');
+    });
+
     it('closes the browser even if pdf() throws', async () => {
       mockPdf.mockRejectedValueOnce(new Error('render failed'));
       const reporter = new EvidenceReporter({ output: 'pdf', file: path.join(tmpDir, 'report.pdf') });

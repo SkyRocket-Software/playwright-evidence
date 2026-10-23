@@ -1,5 +1,6 @@
 {
   "title": "Skyrocket POC Evidence",
+  "footer": "Skyrocket Software",
   "overview": "This is the marketing homepage for **Skyrocket**, a fictional product-launch platform. It introduces the product to a visitor, communicates its value proposition, and gives them a way to get started, explore pricing, or get in touch.\n\nThe requirements below trace each of those visitor-facing claims to the tests that prove them.",
   "features": {
     "hero": {

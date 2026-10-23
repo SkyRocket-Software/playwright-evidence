@@ -7,6 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 interface Content {
   title: string;
+  footer?: string;
   overview: string;
   features: Record<string, { title: string; body: string }>;
   requirements: Record<string, string | { description: string; features?: string[] }>;
@@ -39,6 +40,7 @@ export default defineConfig({
         output: 'pdf',
         file: 'e2e-output/evidence-report.pdf',
         title: content.title,
+        footer: content.footer,
         overview: content.overview,
         // FR-PRICING-1 (see e2e/content.json) is deliberately untagged by any
         // test — demonstrates the traceability matrix surfacing a MISSED
