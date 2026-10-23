@@ -1,6 +1,6 @@
 {
   "name": "@skyrocket-software/playwright-evidence",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "type": "module",
   "packageManager": "pnpm@11.5.0",
   "exports": {
