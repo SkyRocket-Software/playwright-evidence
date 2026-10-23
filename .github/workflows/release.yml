@@ -47,10 +47,34 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # semantic-release exits 0 both when it cuts a release as
+      # warning rather than a failure.
+      - name: Verify release was cut
+        id: verify
+        run: |
+          if [ -z "$(ls releases/*.tgz 2>/dev/null)" ]; then
+            last_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "(no tags yet)")
+            since=${last_tag}..
+            [ "$last_tag" = "(no tags yet)" ] && since=""
+            commits=$(git log --oneline ${since}HEAD 2>/dev/null)
+            if [ -z "$commits" ]; then
+              echo "::warning::no release cut — no new commits since ${last_tag}; skipping npm stage"
+            else
+              count=$(printf '%s\n' "$commits" | wc -l)
+              echo "::warning::no release cut — none of the ${count} commit(s) since ${last_tag} have a feat:/fix: (or breaking) subject; skipping npm stage"
+              echo "Commits semantic-release evaluated:"
+              printf '%s\n' "$commits"
+            fi
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Release tarball present: $(ls releases/*.tgz)"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          fi
 
       # Submits the version to npm's staging area for maintainer review.
-      # No 2FA required here; the human approval happens on npmjs.com.
+      # Skipped when no release was cut (see the warning above).
       - name: Stage on npm for review
+        if: steps.verify.outputs.released == 'true'
         run: |
           npm config set //registry.npmjs.org/:_authToken "${NPM_TOKEN}"
           npm stage publish ./releases/*.tgz --access public

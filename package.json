@@ -1,6 +1,24 @@
 {
   "name": "@skyrocket-software/playwright-evidence",
   "version": "0.6.2",
+  "description": "A Playwright reporter and step helpers that produce evidence reports — suitable for QA sign-off, client delivery, or compliance documentation.",
+  "keywords": [
+    "playwright",
+    "playwright-reporter",
+    "evidence",
+    "evidence-report",
+    "test-evidence",
+    "qa",
+    "compliance",
+    "traceability",
+    "screenshot",
+    "pdf-report"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SkyRocket-Software/playwright-evidence.git"
+  },
   "type": "module",
   "packageManager": "pnpm@11.5.0",
   "exports": {
