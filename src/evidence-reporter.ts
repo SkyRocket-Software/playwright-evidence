@@ -107,6 +107,12 @@ interface EvidenceReporterOptions {
    * escaped, not passed through. Default: undefined (no overview is rendered).
    */
   overview?: string;
+  /**
+   * Organization or product name shown on the left of the PDF page footer
+   * (right side shows "Page X of Y"). PDF mode only — HTML mode has no
+   * footer. Default: undefined (nothing is shown on the left).
+   */
+  footer?: string;
 }
 
 /**
@@ -276,7 +282,7 @@ export default class EvidenceReporter implements Reporter {
     const title = this.options.title ?? 'Test Evidence Report';
 
     if (this.options.output === 'pdf') {
-      await this.generatePdf(title);
+      await this.generatePdf(title, this.options.footer);
     } else {
       this.generateHtml(title);
     }
@@ -301,7 +307,7 @@ export default class EvidenceReporter implements Reporter {
    * numbers substituted into the same reserved space so layout doesn't shift.
    * Both passes share one browser launch.
    */
-  private async generatePdf(title: string): Promise<void> {
+  private async generatePdf(title: string, footer: string | undefined): Promise<void> {
     const pdfPath = this.resolveOutFile('pdf');
 
     // Dynamic import keeps startup fast when PDF is not requested,
@@ -313,14 +319,14 @@ export default class EvidenceReporter implements Reporter {
       const draftHtmlPath = path.join(this.screenshotDir, 'report-draft.html');
       fs.writeFileSync(draftHtmlPath, draftHtml, 'utf8');
       const draftPdfPath = path.join(this.screenshotDir, 'report-draft.pdf');
-      await this.printPdf(browser, draftHtmlPath, draftPdfPath, title, this.startTime);
+      await this.printPdf(browser, draftHtmlPath, draftPdfPath, title, footer, this.startTime);
 
       const pageNumbers = await this.resolvePageNumbers(draftPdfPath);
 
       const finalHtml = renderReport(title, this.tests, this.startTime, this.options.requirements, this.features, this.options.overview, pageNumbers);
       const finalHtmlPath = path.join(this.screenshotDir, 'report.html');
       fs.writeFileSync(finalHtmlPath, finalHtml, 'utf8');
-      await this.printPdf(browser, finalHtmlPath, pdfPath, title, this.startTime);
+      await this.printPdf(browser, finalHtmlPath, pdfPath, title, footer, this.startTime);
     } finally {
       await browser.close();
     }
@@ -373,6 +379,7 @@ export default class EvidenceReporter implements Reporter {
    * @param htmlPath  - Absolute path to the HTML file to print
    * @param pdfPath   - Absolute path for the PDF output
    * @param title     - Report title shown in the PDF page header
+   * @param footer    - Organization/product name shown on the left of the PDF page footer; omitted when undefined
    * @param startTime - Run date shown in the PDF page header
    */
   private async printPdf(
@@ -380,6 +387,7 @@ export default class EvidenceReporter implements Reporter {
     htmlPath: string,
     pdfPath: string,
     title: string,
+    footer: string | undefined,
     startTime: Date,
   ): Promise<void> {
     // UTC so this always agrees with the UTC timestamp in the output filename,
@@ -396,11 +404,14 @@ export default class EvidenceReporter implements Reporter {
         <span>${escape(dateStr)}</span>
       </div>`;
 
+    // The left span stays in the template even when empty so space-between
+    // keeps the page number right-aligned.
+    const footerLabel = footer ? escape(footer) : '';
     const footerTemplate = `
       <div style="width:100%;padding:0 15mm;display:flex;justify-content:space-between;
                   align-items:center;font-family:Georgia,serif;font-size:9px;color:#555;
                   border-top:1px solid #ddd;">
-        <span>Skyrocket Software</span>
+        <span>${footerLabel}</span>
         <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
       </div>`;
 

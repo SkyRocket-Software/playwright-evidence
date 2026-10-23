@@ -26,7 +26,7 @@ playwright.config.ts   # Playwright config for the POC e2e tests (output: pdf)
 
 - **Two output modes** — `output: 'html'` (default) produces a self-contained HTML file with screenshots base64-embedded; `output: 'pdf'` writes screenshots to a sidecar directory during the run, generates a PDF via headless Chromium, then deletes the HTML and sidecar directory — only the PDF is kept
 - **PDF mode is CI-storage-friendly** — screenshots are never accumulated as base64 in memory; they're written to disk as PNGs during `onTestEnd` and loaded by Chromium at print time, keeping peak memory and transient disk use low
-- **PDF includes headers and footers** — report title and run date in the header; "Skyrocket Software" and page X of Y in the footer, rendered via Chromium's `displayHeaderFooter` with inline-styled templates
+- **PDF includes headers and footers** — report title and run date in the header; the optional `footer` (org/product name, left side) and page X of Y in the footer, rendered via Chromium's `displayHeaderFooter` with inline-styled templates
 - **Two step types** — `setupStep` (no screenshot, muted in report) vs `evidenceStep` (always screenshots, pass/fail badge)
 - **Screenshot scale is configurable** — `evidenceStep` accepts `{ screenshotScale: 'css' | 'device' }` (default `'device'`); use `'css'` to halve screenshot dimensions on retina/HiDPI displays and reduce file size
 - **Screenshot via body buffer** — `page.screenshot()` returns a Buffer passed directly to `testInfo.attach({ body })` in HTML mode, avoiding tmpdir writes; in PDF mode the buffer is written to the sidecar directory instead

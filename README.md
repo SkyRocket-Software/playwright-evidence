@@ -56,6 +56,7 @@ export default defineConfig({
 | `requirements` | `undefined` | Maps a functional requirement ID (matched against each test's tags, leading `@` stripped) to its prose description, or to `{ description, features }` to also declare which `features` entry(ies) the requirement supports. When set, each test's section lists the requirement(s) it proves, and a Requirements Traceability Matrix section lists every requirement, its covering test(s), and a rolled-up pass/fail/skipped/missed status |
 | `features` | `undefined` | Feature ID -> `{ title, body }` map (`body` is Markdown). Adds an About section after the Table of Contents, one shared section per feature, each with a status rolled up from every test proving a requirement that lists the feature |
 | `overview` | `undefined` | Markdown description of the application as a whole, rendered on the cover page between the run date and the pass/fail summary |
+| `footer` | `undefined` | Organization or product name shown on the left of the PDF page footer (PDF mode only; nothing is shown when unset) |
 
 #### Flaky tests
 
